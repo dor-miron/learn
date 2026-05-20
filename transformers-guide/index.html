@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>A Visual Guide to Transformers</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>A Visual Guide to Transformers</a>
+    <div class="links">
+      <a href="index.html" class="active">Overview</a>
+      <a href="attention.html">Attention</a>
+      <a href="dino.html">ViT &amp; DINO</a>
+      <a href="llms.html">LLMs &amp; Decoders</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wide">
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">A short interactive textbook</div>
+      <h1>Transformers, attention, and what makes DINO see objects.</h1>
+      <p class="lead">A focused tour of the ideas behind modern deep learning &mdash; written for someone who wants to build solid mental models, not memorise PyTorch incantations. Each page stands alone, but they build on each other.</p>
+    </header>
+
+    <figure>
+      <svg viewBox="0 0 760 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Three pillars: attention as foundation, ViT/DINO and LLMs as branches">
+        <defs>
+          <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#1f5f7a"/>
+          </marker>
+        </defs>
+        <!-- Foundation -->
+        <rect x="260" y="160" width="240" height="40" rx="6" fill="#d4e7ec" stroke="#1f5f7a"/>
+        <text x="380" y="185" text-anchor="middle" font-family="ui-serif, Georgia" font-size="16" fill="#163f52">Attention &mdash; the core mechanism</text>
+
+        <!-- Branches -->
+        <rect x="60"  y="60" width="200" height="60" rx="6" fill="#f6dccc" stroke="#d97757"/>
+        <text x="160" y="85"  text-anchor="middle" font-family="ui-serif, Georgia" font-size="15" fill="#5a2a10">ViT &amp; DINO</text>
+        <text x="160" y="105" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#6b6b6b">vision &middot; emergent segmentation</text>
+
+        <rect x="500" y="60" width="200" height="60" rx="6" fill="#d8e3d5" stroke="#6b8e6f"/>
+        <text x="600" y="85"  text-anchor="middle" font-family="ui-serif, Georgia" font-size="15" fill="#2e4630">LLMs &amp; Decoders</text>
+        <text x="600" y="105" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#6b6b6b">language &middot; autoregressive</text>
+
+        <!-- Arrows up from foundation -->
+        <path d="M340,160 C320,140 280,130 220,120" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr)"/>
+        <path d="M420,160 C440,140 480,130 540,120" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <text x="380" y="30" text-anchor="middle" font-family="ui-serif, Georgia" font-style="italic" font-size="14" fill="#3a3a3a">Same mechanism, two very different applications</text>
+      </svg>
+      <figcaption>One mechanism underneath, two families of models on top.</figcaption>
+    </figure>
+
+    <h2>How to read this</h2>
+    <p>If you have time, read in order. The attention page builds the vocabulary every other page leans on. If you only care about a specific topic, each page is self-contained and the cross-references are explicit.</p>
+
+    <div class="cards">
+      <a class="card" href="attention.html">
+        <div class="num">01 &middot; foundation</div>
+        <h3>Attention</h3>
+        <p>What attention actually computes, why <em>Q</em>, <em>K</em>, <em>V</em>, why the &radic;<em>d</em> scaling, and what masking is for. The shared core of every model on this site.</p>
+      </a>
+      <a class="card" href="dino.html">
+        <div class="num">02 &middot; vision</div>
+        <h3>ViT &amp; DINO</h3>
+        <p>How a Vision Transformer turns an image into tokens, what the <code>[CLS]</code> token is, and the magic of DINO &mdash; why segmentation maps fall out of a model that was never trained on segmentation.</p>
+      </a>
+      <a class="card" href="llms.html">
+        <div class="num">03 &middot; language</div>
+        <h3>LLMs &amp; Decoders</h3>
+        <p>Why GPT-style models are called <em>decoder-only</em> even though they obviously encode their prompt, what &ldquo;causal&rdquo; means, and why this family ate the world.</p>
+      </a>
+    </div>
+
+    <h2>Your questions, mapped</h2>
+    <p>You asked about a few specific things. Here is where each one is answered:</p>
+    <ul>
+      <li><strong>How does segmentation arise from DINO?</strong> &rarr; <a href="dino.html#emergence">ViT &amp; DINO &sect; Why segmentation emerges</a></li>
+      <li><strong>What is the <code>[CLS]</code> token and how is it shaped by training?</strong> &rarr; <a href="dino.html#cls">ViT &amp; DINO &sect; The CLS token</a></li>
+      <li><strong>Why are LLMs called decoders?</strong> &rarr; <a href="llms.html#why-decoder">LLMs &sect; Why &ldquo;decoder&rdquo;?</a></li>
+      <li><strong>Isn&rsquo;t the prompt &ldquo;encoded&rdquo; first?</strong> &rarr; <a href="llms.html#prefill">LLMs &sect; Prefill vs decode</a></li>
+    </ul>
+
+    <h2>Topics worth learning next</h2>
+    <p>If you find yourself curious after these three pages, the natural follow-ons are:</p>
+    <div class="cards">
+      <div class="card" style="cursor:default; transform:none;">
+        <div class="num">next &middot; foundations</div>
+        <h3>Positional encodings</h3>
+        <p>Attention is permutation-invariant &mdash; so how do transformers know word order? Sinusoidal, learned, RoPE, ALiBi. Tiny topic, big consequences.</p>
+      </div>
+      <div class="card" style="cursor:default; transform:none;">
+        <div class="num">next &middot; engineering</div>
+        <h3>Tokenization &amp; the KV cache</h3>
+        <p>Why &ldquo;strawberry&rdquo; has three R&rsquo;s the model can&rsquo;t count, and why generating the 100&rsquo;000th token is much cheaper than re-reading the prompt each time.</p>
+      </div>
+      <div class="card" style="cursor:default; transform:none;">
+        <div class="num">next &middot; training</div>
+        <h3>RLHF and post-training</h3>
+        <p>How a next-token predictor becomes a chat assistant. SFT, reward models, PPO and DPO, at a conceptual level.</p>
+      </div>
+      <div class="card" style="cursor:default; transform:none;">
+        <div class="num">next &middot; scale</div>
+        <h3>Mixture of Experts</h3>
+        <p>Why frontier models have 100s of billions of parameters but only activate a fraction per token. Routing, load balancing, why this changes the cost curve.</p>
+      </div>
+      <div class="card" style="cursor:default; transform:none;">
+        <div class="num">next &middot; vision</div>
+        <h3>CLIP &amp; contrastive learning</h3>
+        <p>The other &ldquo;no labels&rdquo; recipe: instead of self-distillation, pull matching (image, caption) pairs together. Underpins half of modern multimodal AI.</p>
+      </div>
+      <div class="card" style="cursor:default; transform:none;">
+        <div class="num">next &middot; theory</div>
+        <h3>Scaling laws</h3>
+        <p>Why &ldquo;just make it bigger&rdquo; keeps working. Compute, parameters, data &mdash; the Chinchilla relationship and what it actually predicts.</p>
+      </div>
+    </div>
+    <p style="color:var(--muted); font-size:14.5px;">Tell me which of these you&rsquo;d like written up next and I&rsquo;ll add pages in the same style.</p>
+
+    <footer class="page-foot">
+      <span>A Visual Guide to Transformers</span>
+      <span><a href="attention.html">Start reading &rarr;</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>

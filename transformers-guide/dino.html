@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ViT &amp; DINO &mdash; A Visual Guide to Transformers</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>A Visual Guide to Transformers</a>
+    <div class="links">
+      <a href="index.html">Overview</a>
+      <a href="attention.html">Attention</a>
+      <a href="dino.html" class="active">ViT &amp; DINO</a>
+      <a href="llms.html">LLMs &amp; Decoders</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">02 &middot; Vision</div>
+      <h1>ViT &amp; DINO.</h1>
+      <p class="lead">Same attention machinery as language models, but applied to image patches. Then a striking result: train this model with no labels at all, and the attention maps spontaneously become object segmentations.</p>
+    </header>
+
+    <h2 id="vit">From images to tokens: the Vision Transformer</h2>
+    <p>Transformers want a sequence of vectors. Images are 2D grids of pixels. So the first job is to turn an image into a sequence. The Vision Transformer (ViT) does the dumbest thing that works: <strong>chop the image into a grid of fixed-size patches, flatten each patch into a vector, and call those your tokens.</strong></p>
+
+    <figure>
+      <svg viewBox="0 0 720 240" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrV" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 Z" fill="#1f5f7a"/>
+          </marker>
+          <linearGradient id="dogGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#d4a374"/>
+            <stop offset="100%" stop-color="#8a5a30"/>
+          </linearGradient>
+        </defs>
+
+        <!-- Input image (stylised) -->
+        <g transform="translate(20,40)">
+          <rect width="160" height="160" fill="#cfe1c8"/>
+          <!-- "dog" oval -->
+          <ellipse cx="80" cy="90" rx="50" ry="42" fill="url(#dogGrad)"/>
+          <circle cx="62" cy="80" r="4" fill="#1a1a1a"/>
+          <circle cx="98" cy="80" r="4" fill="#1a1a1a"/>
+          <ellipse cx="80" cy="100" rx="10" ry="6" fill="#3a1f10"/>
+          <ellipse cx="58" cy="55" rx="12" ry="18" fill="url(#dogGrad)" transform="rotate(-20 58 55)"/>
+          <ellipse cx="102" cy="55" rx="12" ry="18" fill="url(#dogGrad)" transform="rotate(20 102 55)"/>
+          <text x="80" y="178" text-anchor="middle" font-family="ui-serif" font-size="11" font-style="italic" fill="#1a1a1a">input image</text>
+        </g>
+
+        <!-- patchify -->
+        <g transform="translate(220,40)" stroke="#1f5f7a" stroke-width="0.8" fill="none">
+          <rect width="160" height="160" fill="#cfe1c8"/>
+          <ellipse cx="80" cy="90" rx="50" ry="42" fill="url(#dogGrad)" stroke="none"/>
+          <circle cx="62" cy="80" r="4" fill="#1a1a1a" stroke="none"/>
+          <circle cx="98" cy="80" r="4" fill="#1a1a1a" stroke="none"/>
+          <ellipse cx="80" cy="100" rx="10" ry="6" fill="#3a1f10" stroke="none"/>
+          <ellipse cx="58" cy="55" rx="12" ry="18" fill="url(#dogGrad)" stroke="none" transform="rotate(-20 58 55)"/>
+          <ellipse cx="102" cy="55" rx="12" ry="18" fill="url(#dogGrad)" stroke="none" transform="rotate(20 102 55)"/>
+          <!-- 4x4 grid -->
+          <line x1="40" y1="0" x2="40" y2="160"/>
+          <line x1="80" y1="0" x2="80" y2="160"/>
+          <line x1="120" y1="0" x2="120" y2="160"/>
+          <line x1="0" y1="40" x2="160" y2="40"/>
+          <line x1="0" y1="80" x2="160" y2="80"/>
+          <line x1="0" y1="120" x2="160" y2="120"/>
+          <rect width="160" height="160" stroke="#1f5f7a" stroke-width="1.2"/>
+          <text x="80" y="178" text-anchor="middle" font-family="ui-serif" font-size="11" font-style="italic" fill="#1a1a1a" stroke="none">split into patches</text>
+        </g>
+
+        <!-- arrow -->
+        <line x1="185" y1="120" x2="215" y2="120" stroke="#1f5f7a" stroke-width="1.4" marker-end="url(#arrV)"/>
+        <line x1="385" y1="120" x2="415" y2="120" stroke="#1f5f7a" stroke-width="1.4" marker-end="url(#arrV)"/>
+
+        <!-- flattened patch vectors -->
+        <g transform="translate(420,40)" font-family="-apple-system" font-size="10">
+          <text x="140" y="-5" text-anchor="middle" font-family="ui-serif" font-size="11" font-style="italic">linear projection per patch</text>
+          <g>
+            <!-- CLS token (special) -->
+            <rect x="0" y="0" width="22" height="160" fill="#fef3c7" stroke="#d97757" stroke-width="1.2"/>
+            <text x="11" y="-12" text-anchor="middle" font-size="10" fill="#8a3f1e">CLS</text>
+            <text x="11" y="86" text-anchor="middle" font-size="11" fill="#5a2a10" transform="rotate(-90 11 86)">learnable</text>
+
+            <!-- patch tokens -->
+            <g fill="#d4e7ec" stroke="#1f5f7a">
+              <rect x="30"  y="0" width="22" height="160"/>
+              <rect x="56"  y="0" width="22" height="160"/>
+              <rect x="82"  y="0" width="22" height="160"/>
+              <rect x="108" y="0" width="22" height="160"/>
+              <rect x="134" y="0" width="22" height="160"/>
+              <rect x="160" y="0" width="22" height="160"/>
+              <rect x="186" y="0" width="22" height="160"/>
+              <rect x="212" y="0" width="22" height="160"/>
+              <rect x="238" y="0" width="22" height="160"/>
+            </g>
+            <text x="145" y="178" text-anchor="middle" font-family="ui-serif" font-size="11" font-style="italic">sequence of N+1 token vectors</text>
+          </g>
+        </g>
+      </svg>
+      <figcaption>An image becomes a 1-D sequence of tokens. The yellow <code>[CLS]</code> token is special &mdash; it&rsquo;s a learnable vector prepended to every input, and the model is free to use it however it wants.</figcaption>
+    </figure>
+
+    <p>A 224 &times; 224 image with 16 &times; 16 patches gives you a 14 &times; 14 grid &mdash; 196 patch tokens, plus the <code>[CLS]</code> token, plus positional embeddings added to each. That sequence then goes through a standard transformer encoder &mdash; exactly the attention blocks from the <a href="attention.html">previous page</a>. Bidirectional attention, no masking, because there&rsquo;s no notion of &ldquo;past&rdquo; in an image.</p>
+
+    <h2 id="cls">The CLS token</h2>
+    <p>The <code>[CLS]</code> token is a learnable vector with no content of its own. It carries no pixel information, ever. It is prepended to the sequence so it can <em>attend to all the patches</em>, but no patch is &ldquo;about&rdquo; the CLS token specifically.</p>
+    <p>So why have it? Because we need a single fixed-size vector to represent the whole image &mdash; for classification, retrieval, whatever. We could average all patch tokens, but the model can do better than the average if we give it a dedicated slot that&rsquo;s allowed to gather information freely. Over training, the CLS token learns to summarise the whole image into one vector, and the standard ViT loss only ever reads from this slot.</p>
+
+    <div class="callout">
+      <div class="label">Key point</div>
+      <p>The CLS token is a <em>register</em> the model uses to accumulate a global summary. Its job, role, and what it ends up paying attention to are entirely shaped by the training objective. We&rsquo;ll see what that means for DINO in a moment.</p>
+    </div>
+
+    <h2>The supervised version (the boring part)</h2>
+    <p>Original ViT is trained the obvious way: feed an image, take the final CLS vector, push through a small classifier, predict the ImageNet label, optimise cross-entropy. It works. It needs a lot of data. It is not particularly interesting.</p>
+    <p>The interesting question: <em>can you train a ViT without labels at all?</em></p>
+
+    <h2>DINO &mdash; self-distillation without labels</h2>
+    <p>DINO (Caron et al., 2021) is one answer. The name unpacks as &ldquo;<strong>se</strong>lf-<strong>di</strong>stillation with <strong>no</strong> labels&rdquo; (the team had fun with the acronym). The recipe is short:</p>
+    <ol>
+      <li>Create <strong>two networks with identical architecture</strong> &mdash; a <em>student</em> and a <em>teacher</em>. Both are ViTs.</li>
+      <li>Take an image. Make <strong>several augmented crops</strong> of it &mdash; two large &ldquo;global&rdquo; crops and several smaller &ldquo;local&rdquo; crops, plus colour jitter, blur, etc.</li>
+      <li>Show the <strong>student all crops</strong>. Show the <strong>teacher only the global crops</strong>.</li>
+      <li>For every (student-output, teacher-output) pair coming from the same source image, ask the student to <strong>match the teacher&rsquo;s output distribution</strong>. This is the loss.</li>
+      <li>Update the student by gradient descent. Update the <strong>teacher as an exponential moving average of the student</strong> &mdash; no gradients flow to the teacher.</li>
+    </ol>
+
+    <figure>
+      <svg viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrD" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 Z" fill="#1f5f7a"/>
+          </marker>
+          <marker id="arrR" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 Z" fill="#d97757"/>
+          </marker>
+          <linearGradient id="dogGrad2" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#d4a374"/>
+            <stop offset="100%" stop-color="#8a5a30"/>
+          </linearGradient>
+        </defs>
+
+        <!-- Source image -->
+        <g transform="translate(20,140)">
+          <rect width="80" height="80" fill="#cfe1c8"/>
+          <ellipse cx="40" cy="48" rx="26" ry="22" fill="url(#dogGrad2)"/>
+          <circle cx="31" cy="42" r="2.5" fill="#1a1a1a"/>
+          <circle cx="49" cy="42" r="2.5" fill="#1a1a1a"/>
+          <text x="40" y="95" text-anchor="middle" font-family="ui-serif" font-style="italic" font-size="11">image</text>
+        </g>
+
+        <!-- Crops -->
+        <g transform="translate(140,30)" font-family="-apple-system" font-size="10" fill="#1a1a1a">
+          <text x="40" y="-8" text-anchor="middle" font-family="ui-serif" font-style="italic">global crops</text>
+          <g transform="translate(0,0)"><rect width="60" height="60" fill="#cfe1c8"/><ellipse cx="30" cy="36" rx="22" ry="20" fill="url(#dogGrad2)"/></g>
+          <g transform="translate(0,80)"><rect width="60" height="60" fill="#cfe1c8"/><ellipse cx="36" cy="30" rx="20" ry="18" fill="url(#dogGrad2)"/></g>
+
+          <text x="40" y="175" text-anchor="middle" font-family="ui-serif" font-style="italic">local crops</text>
+          <g transform="translate(-10,185)"><rect width="32" height="32" fill="#cfe1c8"/><ellipse cx="16" cy="16" rx="14" ry="12" fill="url(#dogGrad2)"/></g>
+          <g transform="translate(30,185)"><rect width="32" height="32" fill="#cfe1c8"/><ellipse cx="22" cy="18" rx="10" ry="9" fill="url(#dogGrad2)"/></g>
+          <g transform="translate(-10,225)"><rect width="32" height="32" fill="#cfe1c8"/><circle cx="20" cy="20" r="10" fill="url(#dogGrad2)"/></g>
+          <g transform="translate(30,225)"><rect width="32" height="32" fill="#cfe1c8"/><ellipse cx="14" cy="20" rx="11" ry="10" fill="url(#dogGrad2)"/></g>
+        </g>
+
+        <!-- Student network -->
+        <g transform="translate(280,30)">
+          <rect width="160" height="240" fill="#f6dccc" stroke="#d97757" rx="6"/>
+          <text x="80" y="22" text-anchor="middle" font-family="ui-serif" font-size="14" fill="#5a2a10">Student ViT</text>
+          <text x="80" y="40" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#6b6b6b">receives all crops</text>
+          <!-- stylised layers -->
+          <g fill="#fff" stroke="#d97757">
+            <rect x="20" y="60" width="120" height="22"/>
+            <rect x="20" y="90" width="120" height="22"/>
+            <rect x="20" y="120" width="120" height="22"/>
+            <rect x="20" y="150" width="120" height="22"/>
+          </g>
+          <text x="80" y="75" text-anchor="middle" font-family="-apple-system" font-size="10">attention block</text>
+          <text x="80" y="105" text-anchor="middle" font-family="-apple-system" font-size="10">attention block</text>
+          <text x="80" y="135" text-anchor="middle" font-family="-apple-system" font-size="10">attention block</text>
+          <text x="80" y="165" text-anchor="middle" font-family="-apple-system" font-size="10">&hellip;</text>
+          <rect x="20" y="185" width="120" height="22" fill="#fef3c7" stroke="#d97757"/>
+          <text x="80" y="200" text-anchor="middle" font-family="-apple-system" font-size="10">projection head</text>
+          <text x="80" y="226" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#5a2a10">output distribution p<tspan font-size="8" baseline-shift="sub">s</tspan></text>
+        </g>
+
+        <!-- Teacher network -->
+        <g transform="translate(490,30)">
+          <rect width="160" height="240" fill="#d8e3d5" stroke="#6b8e6f" rx="6"/>
+          <text x="80" y="22" text-anchor="middle" font-family="ui-serif" font-size="14" fill="#2e4630">Teacher ViT</text>
+          <text x="80" y="40" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#6b6b6b">receives global crops</text>
+          <g fill="#fff" stroke="#6b8e6f">
+            <rect x="20" y="60" width="120" height="22"/>
+            <rect x="20" y="90" width="120" height="22"/>
+            <rect x="20" y="120" width="120" height="22"/>
+            <rect x="20" y="150" width="120" height="22"/>
+          </g>
+          <text x="80" y="75" text-anchor="middle" font-family="-apple-system" font-size="10">attention block</text>
+          <text x="80" y="105" text-anchor="middle" font-family="-apple-system" font-size="10">attention block</text>
+          <text x="80" y="135" text-anchor="middle" font-family="-apple-system" font-size="10">attention block</text>
+          <text x="80" y="165" text-anchor="middle" font-family="-apple-system" font-size="10">&hellip;</text>
+          <rect x="20" y="185" width="120" height="22" fill="#fef3c7" stroke="#6b8e6f"/>
+          <text x="80" y="200" text-anchor="middle" font-family="-apple-system" font-size="10">projection head</text>
+          <text x="80" y="226" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#2e4630">output distribution p<tspan font-size="8" baseline-shift="sub">t</tspan></text>
+        </g>
+
+        <!-- arrows from crops to student -->
+        <g stroke="#1f5f7a" stroke-width="1.1" fill="none">
+          <line x1="200" y1="60" x2="280" y2="80" marker-end="url(#arrD)"/>
+          <line x1="200" y1="140" x2="280" y2="120" marker-end="url(#arrD)"/>
+          <line x1="200" y1="220" x2="280" y2="160" marker-end="url(#arrD)"/>
+          <line x1="200" y1="260" x2="280" y2="190" marker-end="url(#arrD)"/>
+        </g>
+        <!-- arrows from global crops to teacher -->
+        <g stroke="#6b8e6f" stroke-width="1.1" fill="none">
+          <line x1="200" y1="60" x2="490" y2="80" marker-end="url(#arrD)" stroke="#6b8e6f"/>
+          <line x1="200" y1="140" x2="490" y2="120" marker-end="url(#arrD)" stroke="#6b8e6f"/>
+        </g>
+
+        <!-- EMA arrow student -> teacher -->
+        <path d="M440,290 C500,330 600,330 570,275" stroke="#d97757" stroke-width="1.4" fill="none" stroke-dasharray="5 3" marker-end="url(#arrR)"/>
+        <text x="510" y="335" text-anchor="middle" font-family="ui-serif" font-style="italic" font-size="12" fill="#d97757">teacher = EMA(student)</text>
+
+        <!-- Loss -->
+        <g transform="translate(360,290)">
+          <rect width="80" height="50" fill="#fef3c7" stroke="#1a1a1a"/>
+          <text x="40" y="22" text-anchor="middle" font-family="ui-serif" font-size="12">loss =</text>
+          <text x="40" y="40" text-anchor="middle" font-family="ui-serif" font-style="italic" font-size="12">H(p<tspan font-size="9" baseline-shift="sub">t</tspan>, p<tspan font-size="9" baseline-shift="sub">s</tspan>)</text>
+        </g>
+        <line x1="360" y1="262" x2="380" y2="290" stroke="#1f5f7a" stroke-width="1.1" marker-end="url(#arrD)"/>
+        <line x1="490" y1="262" x2="430" y2="295" stroke="#1f5f7a" stroke-width="1.1" marker-end="url(#arrD)"/>
+      </svg>
+      <figcaption>The DINO setup. Student sees everything, teacher sees only the global views. The loss asks the student to predict whatever the teacher is outputting. The teacher is just a slow-moving copy of the student.</figcaption>
+    </figure>
+
+    <h2>Why this isn&rsquo;t obviously crazy</h2>
+    <p>At first glance, DINO looks impossible. If the teacher is just a slow copy of the student, what stops both networks from collapsing to the trivial solution &ldquo;always output the same vector&rdquo;? That would satisfy the loss perfectly.</p>
+    <p>Two design choices prevent collapse:</p>
+    <ul>
+      <li><strong>Centering</strong> the teacher output: subtract a running mean from the teacher&rsquo;s logits before softmax. This stops any single dimension from dominating.</li>
+      <li><strong>Sharpening</strong> the teacher output: use a much lower softmax temperature for the teacher than the student. This makes the teacher&rsquo;s distribution peaky and the student&rsquo;s smooth. The student is being asked to match a confident target with a less-confident prediction.</li>
+    </ul>
+    <p>Centering pushes the distribution toward uniform; sharpening pushes it toward one-hot. The two pressures cancel out at some non-trivial equilibrium, and the network has to make actual use of the input to thread that needle.</p>
+
+    <div class="callout sage">
+      <div class="label">The loss in one line</div>
+      <p>For each student-view <em>s</em> and teacher-view <em>t</em> (with <em>t</em> &ne; <em>s</em>) of the same image:</p>
+      <p class="eq" style="margin-top: 8px;">L = &minus; &sum;<span class="small">i</span> p<span class="small">t</span>(i) &middot; log&thinsp;p<span class="small">s</span>(i)</p>
+      <p style="font-size:14px; margin-top:8px;">i.e. cross-entropy between the teacher&rsquo;s output distribution (treated as the target) and the student&rsquo;s output distribution.</p>
+    </div>
+
+    <h2 id="emergence">Why segmentation emerges &mdash; the punchline</h2>
+    <p>Here is the surprise. After training a DINO ViT with the recipe above, the team looked at the attention maps of the <code>[CLS]</code> token in the last layer &mdash; that is, how much each patch contributes to the CLS summary. They found, with no further training, no segmentation labels, no boundary loss:</p>
+
+    <figure>
+      <svg viewBox="0 0 600 240" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="dogGrad3" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#d4a374"/>
+            <stop offset="100%" stop-color="#8a5a30"/>
+          </linearGradient>
+          <radialGradient id="attnGrad" cx="0.5" cy="0.5" r="0.55">
+            <stop offset="0%" stop-color="#fef3c7" stop-opacity="0.95"/>
+            <stop offset="50%" stop-color="#d97757" stop-opacity="0.55"/>
+            <stop offset="100%" stop-color="#1f5f7a" stop-opacity="0.0"/>
+          </radialGradient>
+        </defs>
+
+        <text x="300" y="20" text-anchor="middle" font-family="ui-serif" font-style="italic" font-size="14">Final-layer CLS attention map &mdash; an emergent segmentation</text>
+
+        <!-- Input -->
+        <g transform="translate(40,40)">
+          <text x="80" y="-8" text-anchor="middle" font-family="-apple-system" font-size="12" fill="#6b6b6b">input</text>
+          <rect width="160" height="160" fill="#cfe1c8"/>
+          <ellipse cx="80" cy="90" rx="50" ry="42" fill="url(#dogGrad3)"/>
+          <circle cx="62" cy="80" r="4" fill="#1a1a1a"/>
+          <circle cx="98" cy="80" r="4" fill="#1a1a1a"/>
+          <ellipse cx="80" cy="100" rx="10" ry="6" fill="#3a1f10"/>
+          <ellipse cx="58" cy="55" rx="12" ry="18" fill="url(#dogGrad3)" transform="rotate(-20 58 55)"/>
+          <ellipse cx="102" cy="55" rx="12" ry="18" fill="url(#dogGrad3)" transform="rotate(20 102 55)"/>
+        </g>
+
+        <!-- arrow -->
+        <line x1="220" y1="120" x2="260" y2="120" stroke="#1f5f7a" stroke-width="1.4" marker-end="url(#arrSeg)"/>
+        <defs>
+          <marker id="arrSeg" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#1f5f7a"/>
+          </marker>
+        </defs>
+
+        <!-- CLS attention heatmap (per patch) -->
+        <g transform="translate(280,40)">
+          <text x="80" y="-8" text-anchor="middle" font-family="-apple-system" font-size="12" fill="#6b6b6b">CLS &rarr; patch attention</text>
+          <!-- background dark -->
+          <rect width="160" height="160" fill="#0d2433"/>
+          <!-- 8x8 grid of patches with attention weights -->
+          <g>
+            <!-- low background patches -->
+            <g fill="#1f5f7a">
+              <!-- corners and edges low -->
+            </g>
+            <!-- assign weights per patch -->
+            <g>
+              <!-- row 0 -->
+              <rect x="0"   y="0"   width="20" height="20" fill="#0d2433"/>
+              <rect x="20"  y="0"   width="20" height="20" fill="#0d2433"/>
+              <rect x="40"  y="0"   width="20" height="20" fill="#163f52"/>
+              <rect x="60"  y="0"   width="20" height="20" fill="#1f5f7a"/>
+              <rect x="80"  y="0"   width="20" height="20" fill="#1f5f7a"/>
+              <rect x="100" y="0"   width="20" height="20" fill="#163f52"/>
+              <rect x="120" y="0"   width="20" height="20" fill="#0d2433"/>
+              <rect x="140" y="0"   width="20" height="20" fill="#0d2433"/>
+              <!-- row 1 -->
+              <rect x="0"   y="20"  width="20" height="20" fill="#0d2433"/>
+              <rect x="20"  y="20"  width="20" height="20" fill="#163f52"/>
+              <rect x="40"  y="20"  width="20" height="20" fill="#4a8a2e"/>
+              <rect x="60"  y="20"  width="20" height="20" fill="#d97757"/>
+              <rect x="80"  y="20"  width="20" height="20" fill="#d97757"/>
+              <rect x="100" y="20"  width="20" height="20" fill="#4a8a2e"/>
+              <rect x="120" y="20"  width="20" height="20" fill="#163f52"/>
+              <rect x="140" y="20"  width="20" height="20" fill="#0d2433"/>
+              <!-- row 2 -->
+              <rect x="0"   y="40"  width="20" height="20" fill="#0d2433"/>
+              <rect x="20"  y="40"  width="20" height="20" fill="#4a8a2e"/>
+              <rect x="40"  y="40"  width="20" height="20" fill="#fef3c7"/>
+              <rect x="60"  y="40"  width="20" height="20" fill="#fef3c7"/>
+              <rect x="80"  y="40"  width="20" height="20" fill="#fef3c7"/>
+              <rect x="100" y="40"  width="20" height="20" fill="#fef3c7"/>
+              <rect x="120" y="40"  width="20" height="20" fill="#4a8a2e"/>
+              <rect x="140" y="40"  width="20" height="20" fill="#0d2433"/>
+              <!-- row 3 -->
+              <rect x="0"   y="60"  width="20" height="20" fill="#163f52"/>
+              <rect x="20"  y="60"  width="20" height="20" fill="#d97757"/>
+              <rect x="40"  y="60"  width="20" height="20" fill="#fef3c7"/>
+              <rect x="60"  y="60"  width="20" height="20" fill="#fef3c7"/>
+              <rect x="80"  y="60"  width="20" height="20" fill="#fef3c7"/>
+              <rect x="100" y="60"  width="20" height="20" fill="#fef3c7"/>
+              <rect x="120" y="60"  width="20" height="20" fill="#d97757"/>
+              <rect x="140" y="60"  width="20" height="20" fill="#163f52"/>
+              <!-- row 4 -->
+              <rect x="0"   y="80"  width="20" height="20" fill="#163f52"/>
+              <rect x="20"  y="80"  width="20" height="20" fill="#d97757"/>
+              <rect x="40"  y="80"  width="20" height="20" fill="#fef3c7"/>
+              <rect x="60"  y="80"  width="20" height="20" fill="#fef3c7"/>
+              <rect x="80"  y="80"  width="20" height="20" fill="#fef3c7"/>
+              <rect x="100" y="80"  width="20" height="20" fill="#fef3c7"/>
+              <rect x="120" y="80"  width="20" height="20" fill="#d97757"/>
+              <rect x="140" y="80"  width="20" height="20" fill="#163f52"/>
+              <!-- row 5 -->
+              <rect x="0"   y="100" width="20" height="20" fill="#0d2433"/>
+              <rect x="20"  y="100" width="20" height="20" fill="#4a8a2e"/>
+              <rect x="40"  y="100" width="20" height="20" fill="#d97757"/>
+              <rect x="60"  y="100" width="20" height="20" fill="#fef3c7"/>
+              <rect x="80"  y="100" width="20" height="20" fill="#fef3c7"/>
+              <rect x="100" y="100" width="20" height="20" fill="#d97757"/>
+              <rect x="120" y="100" width="20" height="20" fill="#4a8a2e"/>
+              <rect x="140" y="100" width="20" height="20" fill="#0d2433"/>
+              <!-- row 6 -->
+              <rect x="0"   y="120" width="20" height="20" fill="#0d2433"/>
+              <rect x="20"  y="120" width="20" height="20" fill="#163f52"/>
+              <rect x="40"  y="120" width="20" height="20" fill="#4a8a2e"/>
+              <rect x="60"  y="120" width="20" height="20" fill="#d97757"/>
+              <rect x="80"  y="120" width="20" height="20" fill="#d97757"/>
+              <rect x="100" y="120" width="20" height="20" fill="#4a8a2e"/>
+              <rect x="120" y="120" width="20" height="20" fill="#163f52"/>
+              <rect x="140" y="120" width="20" height="20" fill="#0d2433"/>
+              <!-- row 7 -->
+              <rect x="0"   y="140" width="20" height="20" fill="#0d2433"/>
+              <rect x="20"  y="140" width="20" height="20" fill="#0d2433"/>
+              <rect x="40"  y="140" width="20" height="20" fill="#163f52"/>
+              <rect x="60"  y="140" width="20" height="20" fill="#1f5f7a"/>
+              <rect x="80"  y="140" width="20" height="20" fill="#1f5f7a"/>
+              <rect x="100" y="140" width="20" height="20" fill="#163f52"/>
+              <rect x="120" y="140" width="20" height="20" fill="#0d2433"/>
+              <rect x="140" y="140" width="20" height="20" fill="#0d2433"/>
+            </g>
+            <!-- grid lines -->
+            <g stroke="#0d2433" stroke-width="0.5" stroke-opacity="0.3">
+              <line x1="20"  y1="0" x2="20"  y2="160"/>
+              <line x1="40"  y1="0" x2="40"  y2="160"/>
+              <line x1="60"  y1="0" x2="60"  y2="160"/>
+              <line x1="80"  y1="0" x2="80"  y2="160"/>
+              <line x1="100" y1="0" x2="100" y2="160"/>
+              <line x1="120" y1="0" x2="120" y2="160"/>
+              <line x1="140" y1="0" x2="140" y2="160"/>
+              <line x1="0" y1="20"  x2="160" y2="20"/>
+              <line x1="0" y1="40"  x2="160" y2="40"/>
+              <line x1="0" y1="60"  x2="160" y2="60"/>
+              <line x1="0" y1="80"  x2="160" y2="80"/>
+              <line x1="0" y1="100" x2="160" y2="100"/>
+              <line x1="0" y1="120" x2="160" y2="120"/>
+              <line x1="0" y1="140" x2="160" y2="140"/>
+            </g>
+          </g>
+        </g>
+
+        <!-- Legend -->
+        <g transform="translate(470,60)" font-family="-apple-system" font-size="11" fill="#1a1a1a">
+          <text x="0" y="-5" font-family="ui-serif" font-style="italic" font-size="12">attention weight</text>
+          <rect x="0" y="0"  width="20" height="14" fill="#fef3c7"/>
+          <text x="28" y="11">high</text>
+          <rect x="0" y="20" width="20" height="14" fill="#d97757"/>
+          <text x="28" y="31">&middot;</text>
+          <rect x="0" y="40" width="20" height="14" fill="#4a8a2e"/>
+          <text x="28" y="51">&middot;</text>
+          <rect x="0" y="60" width="20" height="14" fill="#1f5f7a"/>
+          <text x="28" y="71">&middot;</text>
+          <rect x="0" y="80" width="20" height="14" fill="#0d2433"/>
+          <text x="28" y="91">low</text>
+        </g>
+      </svg>
+      <figcaption>What the CLS token attends to in the last layer of a trained DINO ViT, schematically. The bright patches trace the object outline. No segmentation label was ever shown to the model.</figcaption>
+    </figure>
+
+    <p>So &mdash; why does this happen? The argument has three steps:</p>
+
+    <ol>
+      <li><strong>The CLS token has to produce a vector that&rsquo;s consistent across crops.</strong> The training loss says: whatever the teacher outputs given the global crop, the student must output approximately the same thing given a (potentially much smaller, much more aggressively augmented) crop of the same image.</li>
+      <li><strong>What is consistent across random crops of an image?</strong> The background changes (different parts of the grass visible). The framing changes. The colours wobble (jitter). The <em>identity of the main object</em> &mdash; the dog &mdash; is roughly the only stable signal across two random crops, because random crops are usually arranged to share the object.</li>
+      <li><strong>So the model is pressured to base its CLS summary on the object, not the background.</strong> The way it does that in a transformer is by <em>attending more to object patches</em>. The CLS-to-patch attention map becomes an object-vs-background map. That is exactly what a segmentation mask is.</li>
+    </ol>
+
+    <div class="callout warm">
+      <div class="label">The deep version of the point</div>
+      <p>The model wasn&rsquo;t taught segmentation. It was taught &ldquo;same-image crops should produce the same summary vector.&rdquo; The only solution to that constraint that generalises is &ldquo;ignore the parts of the image that vary between crops, focus on the parts that don&rsquo;t.&rdquo; And the parts that don&rsquo;t vary are the object. Segmentation is the path of least resistance through the loss.</p>
+    </div>
+
+    <h2>How training shapes the CLS token specifically</h2>
+    <p>Reading order matters here. The CLS token starts as a learnable vector of essentially noise. In early training, it has no idea what to attend to, and its attention map looks roughly uniform &mdash; every patch contributes about equally. As gradients flow:</p>
+    <ul>
+      <li>The patches that <strong>help the CLS match the teacher</strong> across crops get attended-to more. Their contribution gains weight.</li>
+      <li>The patches that <strong>vary uselessly across crops</strong> (background, distractors) become a liability &mdash; attending to them makes the CLS jitter. They get attended-to less.</li>
+      <li>By late training, the CLS attention map is concentrated on the persistent semantic content &mdash; the object.</li>
+    </ul>
+    <p>This is why people sometimes describe DINO as &ldquo;learning what objects are without being told.&rdquo; The loss is just &ldquo;match the teacher&rdquo;, but the path through that loss runs through the concept of object-ness.</p>
+
+    <h2>Why ViT (not a CNN) makes this so visible</h2>
+    <p>A CNN trained with a similar self-distillation recipe also learns useful features, but you can&rsquo;t just read a segmentation map off its last feature map. ViTs are different in a useful way:</p>
+    <ul>
+      <li>Every layer&rsquo;s attention is a literal <em>N</em> &times; <em>N</em> matrix of weights between patches. You can pluck out the CLS row and reshape it to the image grid. It is <em>directly</em> a heatmap over the input.</li>
+      <li>The CLS is the only mandatory aggregator, so the model has to put its summary there &mdash; you can&rsquo;t hide information in a global average pool, because there isn&rsquo;t one.</li>
+    </ul>
+
+    <h2>One more thing: this is not classification</h2>
+    <p>Notice what the &ldquo;output distribution&rdquo; <em>p<span class="small">s</span></em>, <em>p<span class="small">t</span></em> in the loss actually is. There&rsquo;s no class set. The projection head produces a vector of, say, 65&thinsp;536 numbers, which is softmaxed into a distribution over <em>nothing in particular</em>. The dimensions don&rsquo;t correspond to dogs, cats, or anything. They&rsquo;re just a place for the model to lay out its features. The only constraint is &ldquo;different views of the same image must produce similar distributions, and over the dataset the average distribution must be reasonably spread out (centering).&rdquo;</p>
+    <p>What ends up emerging in that 65&thinsp;536-dim distribution is something like a prototype index &mdash; clusters that correspond, post-hoc, to recognisable semantic categories. But the model was never told about them.</p>
+
+    <h2>DINOv2 in one paragraph</h2>
+    <p>The 2023 follow-up (DINOv2) keeps the self-distillation core and scales it up &mdash; much more data, careful data curation, bigger ViTs, plus an additional iBOT-style masked patch prediction loss alongside the CLS-distillation loss. The result is a foundation model whose frozen features are competitive with supervised ones on basically every dense-prediction task: depth, segmentation, retrieval, fine-grained classification. The mechanism is the same; the engineering is heroic.</p>
+
+    <h2>Recap</h2>
+    <ul>
+      <li>A ViT cuts an image into patches and treats each as a token. A learnable <code>[CLS]</code> token is prepended to serve as a global summary slot.</li>
+      <li>DINO trains a ViT with no labels by self-distillation: a student matches the output of a slow-moving teacher copy of itself, across different augmented crops of the same image.</li>
+      <li>Centering and sharpening keep the system from collapsing to a constant output.</li>
+      <li>Segmentation emerges because the only way to produce a consistent CLS summary across crops is to attend to the parts of the image that don&rsquo;t change &mdash; the object &mdash; and downweight everything else.</li>
+      <li>The CLS&rsquo;s last-layer attention map, read directly, is a usable object mask.</li>
+    </ul>
+
+    <footer class="page-foot">
+      <span><a href="attention.html">&larr; Attention</a></span>
+      <span><a href="llms.html">LLMs &amp; Decoders &rarr;</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>

@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Attention &mdash; A Visual Guide to Transformers</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>A Visual Guide to Transformers</a>
+    <div class="links">
+      <a href="index.html">Overview</a>
+      <a href="attention.html" class="active">Attention</a>
+      <a href="dino.html">ViT &amp; DINO</a>
+      <a href="llms.html">LLMs &amp; Decoders</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">01 &middot; Foundation</div>
+      <h1>Attention.</h1>
+      <p class="lead">The whole tower is built on one operation. It is small, surprisingly geometric, and once you see it clearly, the rest of the architecture is mostly plumbing.</p>
+    </header>
+
+    <h2>The job attention is doing</h2>
+    <p>You have a sequence of tokens &mdash; words, image patches, audio frames, doesn&rsquo;t matter. Each one is a vector. Most useful information about a token is not <em>in</em> the token itself, it lives in <em>relationships to other tokens</em>. The word &ldquo;bank&rdquo; means something different in &ldquo;river bank&rdquo; than in &ldquo;Swiss bank&rdquo;. The patch of pixels in the middle of an image only becomes &ldquo;a dog&rsquo;s nose&rdquo; once you know there&rsquo;s a dog face around it.</p>
+    <p>Attention is a way for every token to <em>look around</em> at the others and pull in information that&rsquo;s relevant. That&rsquo;s it. Everything below is just the mechanics of how it does that, learnably and in parallel.</p>
+
+    <div class="callout">
+      <div class="label">Intuition</div>
+      <p>Attention is <strong>soft, content-addressable memory</strong>. Each token writes a question into a shared pool, reads answers from every other token, and updates itself with a blend of what it found.</p>
+    </div>
+
+    <h2>Tokens are vectors</h2>
+    <p>Forget the word &ldquo;token&rdquo; for a moment. Each position in the input is a point in some high-dimensional space &mdash; say <em>d</em> = 768 dimensions for a typical model. That vector is the <em>only</em> handle the model has on this position. Everything we&rsquo;re about to do is matrix multiplication on these vectors.</p>
+
+    <figure>
+      <svg viewBox="0 0 700 160" xmlns="http://www.w3.org/2000/svg">
+        <text x="350" y="20" text-anchor="middle" font-family="ui-serif, Georgia" font-style="italic" font-size="14" fill="#3a3a3a">Input: a sequence of token vectors</text>
+
+        <!-- 5 token vectors -->
+        <g font-family="-apple-system, sans-serif" font-size="11" fill="#1a1a1a">
+          <g transform="translate(60,50)">
+            <rect width="80" height="80" fill="#fff" stroke="#1f5f7a"/>
+            <text x="40" y="-8" text-anchor="middle" font-size="13">&ldquo;the&rdquo;</text>
+            <text x="40" y="20" text-anchor="middle">0.12</text>
+            <text x="40" y="38" text-anchor="middle">-0.43</text>
+            <text x="40" y="56" text-anchor="middle">0.91</text>
+            <text x="40" y="74" text-anchor="middle">&hellip;</text>
+          </g>
+          <g transform="translate(180,50)">
+            <rect width="80" height="80" fill="#fff" stroke="#1f5f7a"/>
+            <text x="40" y="-8" text-anchor="middle" font-size="13">&ldquo;river&rdquo;</text>
+            <text x="40" y="20" text-anchor="middle">-0.55</text>
+            <text x="40" y="38" text-anchor="middle">0.21</text>
+            <text x="40" y="56" text-anchor="middle">0.08</text>
+            <text x="40" y="74" text-anchor="middle">&hellip;</text>
+          </g>
+          <g transform="translate(300,50)">
+            <rect width="80" height="80" fill="#fff" stroke="#1f5f7a"/>
+            <text x="40" y="-8" text-anchor="middle" font-size="13">&ldquo;bank&rdquo;</text>
+            <text x="40" y="20" text-anchor="middle">0.30</text>
+            <text x="40" y="38" text-anchor="middle">0.62</text>
+            <text x="40" y="56" text-anchor="middle">-0.17</text>
+            <text x="40" y="74" text-anchor="middle">&hellip;</text>
+          </g>
+          <g transform="translate(420,50)">
+            <rect width="80" height="80" fill="#fff" stroke="#1f5f7a"/>
+            <text x="40" y="-8" text-anchor="middle" font-size="13">&ldquo;was&rdquo;</text>
+            <text x="40" y="20" text-anchor="middle">-0.11</text>
+            <text x="40" y="38" text-anchor="middle">0.04</text>
+            <text x="40" y="56" text-anchor="middle">0.77</text>
+            <text x="40" y="74" text-anchor="middle">&hellip;</text>
+          </g>
+          <g transform="translate(540,50)">
+            <rect width="80" height="80" fill="#fff" stroke="#1f5f7a"/>
+            <text x="40" y="-8" text-anchor="middle" font-size="13">&ldquo;muddy&rdquo;</text>
+            <text x="40" y="20" text-anchor="middle">0.48</text>
+            <text x="40" y="38" text-anchor="middle">-0.29</text>
+            <text x="40" y="56" text-anchor="middle">0.55</text>
+            <text x="40" y="74" text-anchor="middle">&hellip;</text>
+          </g>
+        </g>
+
+        <text x="350" y="150" text-anchor="middle" font-family="-apple-system" font-size="12" fill="#6b6b6b">each column = one token = one vector in &reals;<tspan font-style="italic">&thinsp;d</tspan></text>
+      </svg>
+      <figcaption>The input to a transformer block. Five tokens, each a <em>d</em>-dimensional vector.</figcaption>
+    </figure>
+
+    <h2>Q, K, V &mdash; three roles, one token</h2>
+    <p>Here&rsquo;s the trick. From each token vector we produce three different vectors by multiplying with three learned matrices:</p>
+    <ul>
+      <li><strong>Query</strong> (<em>q</em>): &ldquo;what am I looking for?&rdquo;</li>
+      <li><strong>Key</strong> (<em>k</em>): &ldquo;what label do I advertise?&rdquo;</li>
+      <li><strong>Value</strong> (<em>v</em>): &ldquo;what content will I hand over if you pick me?&rdquo;</li>
+    </ul>
+    <p>If it helps, think of a search engine. Your query is the search box, every webpage has keywords (keys) it advertises itself with, and the actual page content is the value. The clever part is that for each token, the model learns <em>three independent linear projections</em> of the same input. The same word can &ldquo;ask&rdquo; for one thing while &ldquo;advertising&rdquo; another.</p>
+
+    <p class="eq">Q = X W<span class="small">Q</span> &nbsp;&nbsp; K = X W<span class="small">K</span> &nbsp;&nbsp; V = X W<span class="small">V</span></p>
+
+    <p>where <em>X</em> is the matrix of all token vectors stacked together (one row per token), and the <em>W</em>&rsquo;s are learned weight matrices. Crucially, the same <em>W<span class="small">Q</span></em>, <em>W<span class="small">K</span></em>, <em>W<span class="small">V</span></em> are applied to every token. The model has to <em>discover</em> what makes a good question, a good label, and a good content vector.</p>
+
+    <h2>The attention formula</h2>
+    <p>Once you have queries, keys, and values, you compute:</p>
+
+    <p class="eq">Attention(Q, K, V) = softmax<big>(</big> Q K<span class="top">T</span> / &radic;<em>d<span class="small">k</span></em> <big>)</big> V</p>
+
+    <p>Three pieces. Take them one at a time.</p>
+
+    <h3>1. Q K<sup>T</sup> &mdash; the similarity matrix</h3>
+    <p>The dot product of query <em>q<span class="small">i</span></em> with key <em>k<span class="small">j</span></em> is a single number measuring how well the question token <em>i</em> is asking matches the label token <em>j</em> is advertising. Computing this for every pair gives an <em>N</em>&times;<em>N</em> matrix of raw similarity scores.</p>
+
+    <figure>
+      <svg viewBox="0 0 600 230" xmlns="http://www.w3.org/2000/svg">
+        <text x="300" y="20" text-anchor="middle" font-family="ui-serif, Georgia" font-style="italic" font-size="14">The attention matrix (5 tokens)</text>
+
+        <!-- Row labels -->
+        <g font-family="-apple-system" font-size="11" fill="#1a1a1a">
+          <text x="95" y="55" text-anchor="end">the</text>
+          <text x="95" y="85" text-anchor="end">river</text>
+          <text x="95" y="115" text-anchor="end">bank</text>
+          <text x="95" y="145" text-anchor="end">was</text>
+          <text x="95" y="175" text-anchor="end">muddy</text>
+          <text x="55" y="105" text-anchor="middle" transform="rotate(-90 55 105)" fill="#6b6b6b">query (row)</text>
+        </g>
+        <!-- Col labels -->
+        <g font-family="-apple-system" font-size="11" fill="#1a1a1a">
+          <text x="120" y="40" text-anchor="middle">the</text>
+          <text x="160" y="40" text-anchor="middle">river</text>
+          <text x="200" y="40" text-anchor="middle">bank</text>
+          <text x="240" y="40" text-anchor="middle">was</text>
+          <text x="280" y="40" text-anchor="middle">muddy</text>
+          <text x="200" y="200" text-anchor="middle" fill="#6b6b6b">key (column)</text>
+        </g>
+        <!-- Grid -->
+        <g>
+          <!-- row 1: the -->
+          <rect x="100" y="45" width="40" height="20" fill="#1f5f7a" fill-opacity="0.55"/>
+          <rect x="140" y="45" width="40" height="20" fill="#1f5f7a" fill-opacity="0.18"/>
+          <rect x="180" y="45" width="40" height="20" fill="#1f5f7a" fill-opacity="0.22"/>
+          <rect x="220" y="45" width="40" height="20" fill="#1f5f7a" fill-opacity="0.10"/>
+          <rect x="260" y="45" width="40" height="20" fill="#1f5f7a" fill-opacity="0.15"/>
+          <!-- row 2: river -->
+          <rect x="100" y="75" width="40" height="20" fill="#1f5f7a" fill-opacity="0.10"/>
+          <rect x="140" y="75" width="40" height="20" fill="#1f5f7a" fill-opacity="0.70"/>
+          <rect x="180" y="75" width="40" height="20" fill="#1f5f7a" fill-opacity="0.40"/>
+          <rect x="220" y="75" width="40" height="20" fill="#1f5f7a" fill-opacity="0.12"/>
+          <rect x="260" y="75" width="40" height="20" fill="#1f5f7a" fill-opacity="0.25"/>
+          <!-- row 3: bank -->
+          <rect x="100" y="105" width="40" height="20" fill="#1f5f7a" fill-opacity="0.10"/>
+          <rect x="140" y="105" width="40" height="20" fill="#1f5f7a" fill-opacity="0.65"/>
+          <rect x="180" y="105" width="40" height="20" fill="#1f5f7a" fill-opacity="0.55"/>
+          <rect x="220" y="105" width="40" height="20" fill="#1f5f7a" fill-opacity="0.10"/>
+          <rect x="260" y="105" width="40" height="20" fill="#1f5f7a" fill-opacity="0.50"/>
+          <!-- row 4: was -->
+          <rect x="100" y="135" width="40" height="20" fill="#1f5f7a" fill-opacity="0.15"/>
+          <rect x="140" y="135" width="40" height="20" fill="#1f5f7a" fill-opacity="0.20"/>
+          <rect x="180" y="135" width="40" height="20" fill="#1f5f7a" fill-opacity="0.45"/>
+          <rect x="220" y="135" width="40" height="20" fill="#1f5f7a" fill-opacity="0.40"/>
+          <rect x="260" y="135" width="40" height="20" fill="#1f5f7a" fill-opacity="0.30"/>
+          <!-- row 5: muddy -->
+          <rect x="100" y="165" width="40" height="20" fill="#1f5f7a" fill-opacity="0.10"/>
+          <rect x="140" y="165" width="40" height="20" fill="#1f5f7a" fill-opacity="0.45"/>
+          <rect x="180" y="165" width="40" height="20" fill="#1f5f7a" fill-opacity="0.55"/>
+          <rect x="220" y="165" width="40" height="20" fill="#1f5f7a" fill-opacity="0.20"/>
+          <rect x="260" y="165" width="40" height="20" fill="#1f5f7a" fill-opacity="0.65"/>
+        </g>
+        <!-- grid lines -->
+        <g stroke="#ffffff" stroke-width="1">
+          <line x1="100" y1="65" x2="300" y2="65"/>
+          <line x1="100" y1="95" x2="300" y2="95"/>
+          <line x1="100" y1="125" x2="300" y2="125"/>
+          <line x1="100" y1="155" x2="300" y2="155"/>
+          <line x1="140" y1="45" x2="140" y2="185"/>
+          <line x1="180" y1="45" x2="180" y2="185"/>
+          <line x1="220" y1="45" x2="220" y2="185"/>
+          <line x1="260" y1="45" x2="260" y2="185"/>
+        </g>
+
+        <!-- Annotation -->
+        <text x="430" y="80" font-family="ui-serif, Georgia" font-style="italic" font-size="13" fill="#3a3a3a">read a row:</text>
+        <text x="430" y="100" font-family="-apple-system" font-size="12" fill="#1a1a1a">&ldquo;bank&rdquo; attends</text>
+        <text x="430" y="118" font-family="-apple-system" font-size="12" fill="#1a1a1a">most to <em>river</em></text>
+        <text x="430" y="136" font-family="-apple-system" font-size="12" fill="#1a1a1a">and <em>muddy</em>.</text>
+        <text x="430" y="170" font-family="-apple-system" font-size="11" fill="#6b6b6b">(after softmax,</text>
+        <text x="430" y="184" font-family="-apple-system" font-size="11" fill="#6b6b6b">each row sums to 1)</text>
+        <path d="M425,108 L305,113" stroke="#d97757" stroke-width="1.2" fill="none" marker-end="url(#arr2)"/>
+        <defs>
+          <marker id="arr2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#d97757"/>
+          </marker>
+        </defs>
+      </svg>
+      <figcaption>Each row is a probability distribution over which other tokens to listen to. &ldquo;Bank&rdquo; has resolved the ambiguity by attending to its contextual neighbours.</figcaption>
+    </figure>
+
+    <h3>2. Divide by &radic;<em>d<span class="small">k</span></em> &mdash; keep gradients alive</h3>
+    <p>If <em>q</em> and <em>k</em> are <em>d<span class="small">k</span></em>-dimensional random vectors with components of unit variance, their dot product has variance proportional to <em>d<span class="small">k</span></em>. For <em>d<span class="small">k</span></em> = 64 that means dot products can easily be in the tens; after softmax, that becomes a one-hot-ish distribution where the gradient through every other entry is essentially zero. Dividing by &radic;<em>d<span class="small">k</span></em> rescales variance back to 1, keeping the softmax in its useful, gradient-friendly region.</p>
+
+    <div class="callout sage">
+      <div class="label">Why this little detail matters</div>
+      <p>Without the &radic;<em>d<span class="small">k</span></em> scaling, deep transformers don&rsquo;t train. It is a tiny line in the formula and it is genuinely load-bearing.</p>
+    </div>
+
+    <h3>3. softmax(&middot;) V &mdash; weighted average</h3>
+    <p>Softmax turns each row of similarity scores into a probability distribution. Multiplying by <em>V</em> says: <strong>my new representation is a weighted average of every value vector, weighted by how much I attended to that token.</strong></p>
+    <p>That is the whole operation. Every token rewrites itself as a soft mixture of everything else.</p>
+
+    <h2>Multi-head: many viewpoints in parallel</h2>
+    <p>A single attention layer learns one similarity metric. But &ldquo;is this word a syntactic subject?&rdquo; and &ldquo;is this word semantically related to <em>money</em>?&rdquo; are different questions, and we&rsquo;d like the model to ask both at once.</p>
+    <p>So we run attention <em>h</em> times in parallel, each with its own <em>W<span class="small">Q</span></em>, <em>W<span class="small">K</span></em>, <em>W<span class="small">V</span></em>, projecting into a smaller <em>d/h</em>-dimensional space. The outputs are concatenated and projected back to <em>d</em>. Heads can specialise &mdash; some look at the previous token, some track agreement, some lock onto rare words. We don&rsquo;t tell them what to specialise in; the gradients do.</p>
+
+    <figure>
+      <svg viewBox="0 0 700 200" xmlns="http://www.w3.org/2000/svg">
+        <text x="350" y="20" text-anchor="middle" font-family="ui-serif, Georgia" font-style="italic" font-size="14">Multi-head attention: same input, several specialists</text>
+        <!-- input -->
+        <rect x="20" y="80" width="80" height="40" fill="#d4e7ec" stroke="#1f5f7a"/>
+        <text x="60" y="105" text-anchor="middle" font-family="-apple-system" font-size="12">input X</text>
+
+        <!-- heads -->
+        <g font-family="-apple-system" font-size="11">
+          <rect x="160" y="40"  width="120" height="30" fill="#fff" stroke="#d97757"/>
+          <text x="220" y="60" text-anchor="middle">head 1 &middot; syntax?</text>
+          <rect x="160" y="80"  width="120" height="30" fill="#fff" stroke="#d97757"/>
+          <text x="220" y="100" text-anchor="middle">head 2 &middot; coref?</text>
+          <rect x="160" y="120" width="120" height="30" fill="#fff" stroke="#d97757"/>
+          <text x="220" y="140" text-anchor="middle">head 3 &middot; semantic?</text>
+          <rect x="160" y="160" width="120" height="30" fill="#fff" stroke="#d97757"/>
+          <text x="220" y="180" text-anchor="middle">head &hellip; &middot; &hellip;</text>
+        </g>
+        <!-- arrows -->
+        <g stroke="#1f5f7a" stroke-width="1" fill="none">
+          <line x1="100" y1="100" x2="160" y2="55"/>
+          <line x1="100" y1="100" x2="160" y2="95"/>
+          <line x1="100" y1="100" x2="160" y2="135"/>
+          <line x1="100" y1="100" x2="160" y2="175"/>
+        </g>
+
+        <!-- concat -->
+        <rect x="340" y="80" width="100" height="40" fill="#f6dccc" stroke="#d97757"/>
+        <text x="390" y="105" text-anchor="middle" font-family="-apple-system" font-size="12">concat</text>
+        <g stroke="#1f5f7a" stroke-width="1" fill="none">
+          <line x1="280" y1="55"  x2="340" y2="95"/>
+          <line x1="280" y1="95"  x2="340" y2="100"/>
+          <line x1="280" y1="135" x2="340" y2="105"/>
+          <line x1="280" y1="175" x2="340" y2="110"/>
+        </g>
+
+        <!-- output proj -->
+        <rect x="480" y="80" width="120" height="40" fill="#d4e7ec" stroke="#1f5f7a"/>
+        <text x="540" y="105" text-anchor="middle" font-family="-apple-system" font-size="12">W<tspan font-size="9" baseline-shift="sub">O</tspan> &middot; back to d</text>
+        <line x1="440" y1="100" x2="480" y2="100" stroke="#1f5f7a" stroke-width="1.2" marker-end="url(#arr3)"/>
+        <defs>
+          <marker id="arr3" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#1f5f7a"/>
+          </marker>
+        </defs>
+
+        <line x1="600" y1="100" x2="660" y2="100" stroke="#1f5f7a" stroke-width="1.2" marker-end="url(#arr3)"/>
+        <text x="685" y="103" text-anchor="middle" font-family="-apple-system" font-size="12">out</text>
+      </svg>
+      <figcaption>Multi-head attention. The heads project into smaller subspaces independently, so the total compute is the same as a single big head, but the model gets several different &ldquo;views&rdquo; for free.</figcaption>
+    </figure>
+
+    <h2>Masking: who is allowed to look at whom</h2>
+    <p>The attention matrix is square &mdash; every token can in principle attend to every other token. But sometimes you want to forbid certain entries. You do that by adding &minus;&infin; to the scores before softmax, which sends those weights to zero.</p>
+
+    <div class="two-col">
+      <figure>
+        <svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+          <text x="120" y="18" text-anchor="middle" font-family="ui-serif, Georgia" font-style="italic" font-size="13">Bidirectional</text>
+          <text x="120" y="34" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#6b6b6b">(BERT, ViT, encoder)</text>
+          <g>
+            <!-- 6x6 grid all colored -->
+            <g fill="#1f5f7a" fill-opacity="0.5">
+              <rect x="40" y="50" width="160" height="160"/>
+            </g>
+            <g stroke="#fff" stroke-width="1">
+              <line x1="40"  y1="76.7"  x2="200" y2="76.7"/>
+              <line x1="40"  y1="103.3" x2="200" y2="103.3"/>
+              <line x1="40"  y1="130"   x2="200" y2="130"/>
+              <line x1="40"  y1="156.7" x2="200" y2="156.7"/>
+              <line x1="40"  y1="183.3" x2="200" y2="183.3"/>
+              <line x1="66.7"  y1="50" x2="66.7"  y2="210"/>
+              <line x1="93.3"  y1="50" x2="93.3"  y2="210"/>
+              <line x1="120"   y1="50" x2="120"   y2="210"/>
+              <line x1="146.7" y1="50" x2="146.7" y2="210"/>
+              <line x1="173.3" y1="50" x2="173.3" y2="210"/>
+            </g>
+            <rect x="40" y="50" width="160" height="160" fill="none" stroke="#1f5f7a"/>
+          </g>
+          <text x="120" y="225" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#6b6b6b">every token sees every token</text>
+        </svg>
+      </figure>
+      <figure>
+        <svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg">
+          <text x="120" y="18" text-anchor="middle" font-family="ui-serif, Georgia" font-style="italic" font-size="13">Causal</text>
+          <text x="120" y="34" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#6b6b6b">(GPT, decoder-only LLM)</text>
+          <g>
+            <!-- lower triangle filled -->
+            <g fill="#1f5f7a" fill-opacity="0.55">
+              <rect x="40"    y="50"    width="26.7" height="26.7"/>
+              <rect x="40"    y="76.7"  width="53.3" height="26.7"/>
+              <rect x="40"    y="103.3" width="80"   height="26.7"/>
+              <rect x="40"    y="130"   width="106.7" height="26.7"/>
+              <rect x="40"    y="156.7" width="133.3" height="26.7"/>
+              <rect x="40"    y="183.3" width="160"  height="26.7"/>
+            </g>
+            <!-- upper triangle hatched/blocked -->
+            <g fill="#f3f0e8">
+              <rect x="66.7"  y="50"    width="133.3" height="26.7"/>
+              <rect x="93.3"  y="76.7"  width="106.7" height="26.7"/>
+              <rect x="120"   y="103.3" width="80"   height="26.7"/>
+              <rect x="146.7" y="130"   width="53.3" height="26.7"/>
+              <rect x="173.3" y="156.7" width="26.7" height="26.7"/>
+            </g>
+            <g stroke="#fff" stroke-width="1">
+              <line x1="40"  y1="76.7"  x2="200" y2="76.7"/>
+              <line x1="40"  y1="103.3" x2="200" y2="103.3"/>
+              <line x1="40"  y1="130"   x2="200" y2="130"/>
+              <line x1="40"  y1="156.7" x2="200" y2="156.7"/>
+              <line x1="40"  y1="183.3" x2="200" y2="183.3"/>
+              <line x1="66.7"  y1="50" x2="66.7"  y2="210"/>
+              <line x1="93.3"  y1="50" x2="93.3"  y2="210"/>
+              <line x1="120"   y1="50" x2="120"   y2="210"/>
+              <line x1="146.7" y1="50" x2="146.7" y2="210"/>
+              <line x1="173.3" y1="50" x2="173.3" y2="210"/>
+            </g>
+            <rect x="40" y="50" width="160" height="160" fill="none" stroke="#1f5f7a"/>
+          </g>
+          <text x="120" y="225" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#6b6b6b">token <em>i</em> sees only tokens &le; <em>i</em></text>
+        </svg>
+      </figure>
+    </div>
+
+    <p>The causal mask on the right is the entire reason GPT-style models are called &ldquo;decoders&rdquo;. We&rsquo;ll come back to that on the <a href="llms.html">LLMs page</a>.</p>
+
+    <h2>Where attention sits in the block</h2>
+    <p>Attention by itself is not a transformer. A transformer block wraps attention with three more pieces:</p>
+    <ul>
+      <li>A <strong>feed-forward network</strong> (a two-layer MLP applied independently to each token) &mdash; this is where most of the parameters live, and where per-token computation happens.</li>
+      <li><strong>Layer normalisation</strong> before each sub-block (modern convention) &mdash; keeps activations well-scaled across depth.</li>
+      <li><strong>Residual connections</strong> around both sub-blocks &mdash; the path of least resistance is &ldquo;don&rsquo;t change anything&rdquo;, which makes deep stacks trainable.</li>
+    </ul>
+
+    <figure>
+      <svg viewBox="0 0 500 320" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arr4" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#1f5f7a"/>
+          </marker>
+        </defs>
+        <text x="250" y="20" text-anchor="middle" font-family="ui-serif, Georgia" font-style="italic" font-size="14">One transformer block</text>
+
+        <!-- main column -->
+        <g font-family="-apple-system" font-size="12">
+          <rect x="180" y="40"  width="140" height="30" fill="#fff" stroke="#1f5f7a"/>
+          <text x="250" y="60"  text-anchor="middle">input x</text>
+
+          <rect x="180" y="90"  width="140" height="30" fill="#d4e7ec" stroke="#1f5f7a"/>
+          <text x="250" y="110" text-anchor="middle">LayerNorm</text>
+
+          <rect x="180" y="140" width="140" height="36" fill="#f6dccc" stroke="#d97757"/>
+          <text x="250" y="163" text-anchor="middle">Multi-head attention</text>
+
+          <rect x="180" y="195" width="140" height="30" fill="#d4e7ec" stroke="#1f5f7a"/>
+          <text x="250" y="215" text-anchor="middle">LayerNorm</text>
+
+          <rect x="180" y="245" width="140" height="36" fill="#d8e3d5" stroke="#6b8e6f"/>
+          <text x="250" y="268" text-anchor="middle">Feed-forward (MLP)</text>
+
+          <rect x="180" y="300" width="140" height="14" fill="none" stroke="none"/>
+        </g>
+
+        <!-- vertical arrows -->
+        <g stroke="#1f5f7a" stroke-width="1.4" fill="none">
+          <line x1="250" y1="70" x2="250" y2="90"  marker-end="url(#arr4)"/>
+          <line x1="250" y1="120" x2="250" y2="140" marker-end="url(#arr4)"/>
+          <line x1="250" y1="176" x2="250" y2="195" marker-end="url(#arr4)"/>
+          <line x1="250" y1="225" x2="250" y2="245" marker-end="url(#arr4)"/>
+        </g>
+
+        <!-- residual paths -->
+        <g stroke="#d97757" stroke-width="1.4" fill="none" stroke-dasharray="4 3">
+          <path d="M180,55 C100,55 100,180 180,180" marker-end="url(#arr4r)"/>
+          <path d="M180,210 C110,210 110,280 180,280" marker-end="url(#arr4r)"/>
+        </g>
+        <defs>
+          <marker id="arr4r" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <path d="M0,0 L8,4 L0,8 Z" fill="#d97757"/>
+          </marker>
+        </defs>
+        <text x="60" y="120" font-family="ui-serif" font-style="italic" font-size="12" fill="#d97757">residual</text>
+        <text x="60" y="250" font-family="ui-serif" font-style="italic" font-size="12" fill="#d97757">residual</text>
+      </svg>
+      <figcaption>A modern (&ldquo;pre-norm&rdquo;) transformer block. Stack <em>L</em> of these and you have a transformer.</figcaption>
+    </figure>
+
+    <div class="callout">
+      <div class="label">Mental model</div>
+      <p>Each block is: <em>let every token gather information from every other token (attention), then think about what it found (MLP), and remember to keep a copy of what it had before (residual).</em> Stack 12&ndash;100 of these and the magic happens.</p>
+    </div>
+
+    <h2>What attention buys you, architecturally</h2>
+    <ul>
+      <li><strong>Parallelism.</strong> Unlike an RNN, attention processes the whole sequence at once. No recurrent step. Trivial to parallelise on GPUs.</li>
+      <li><strong>Long-range dependencies.</strong> Token 1 and token 1000 are equidistant. No information has to crawl through 999 hidden states.</li>
+      <li><strong>Permutation-equivariance (a feature <em>and</em> a problem).</strong> The operation doesn&rsquo;t inherently know about order &mdash; which is why we add positional encodings to the input. Otherwise, &ldquo;dog bites man&rdquo; and &ldquo;man bites dog&rdquo; would be indistinguishable.</li>
+      <li><strong>Generality.</strong> Tokens can be anything: words, image patches, audio frames, robot actions. Same machine.</li>
+    </ul>
+
+    <h2>What it costs you</h2>
+    <p>The attention matrix is <em>N</em> &times; <em>N</em>. Memory and compute scale <em>quadratically</em> with sequence length. Doubling your context length quadruples the cost of attention. This is the central engineering pain of long-context LLMs, and most of the past few years of inference research is some way of making that quadratic less brutal (FlashAttention, sliding windows, sparse attention, state-space hybrids, etc.).</p>
+
+    <h2>Recap before you move on</h2>
+    <ul>
+      <li>Every token is a vector. Same vector becomes three vectors via learned projections: <strong>Q</strong>, <strong>K</strong>, <strong>V</strong>.</li>
+      <li><em>QK<sup>T</sup></em> is a similarity matrix. Divide by &radic;<em>d<span class="small">k</span></em> to keep softmax tame. Softmax it to get attention weights.</li>
+      <li>Multiply the weights by <em>V</em> to get a new representation: a weighted average of values.</li>
+      <li>Do this <em>h</em> times in parallel (multi-head), concatenate, project.</li>
+      <li>Masking decides who can see whom. Causal masking is what makes a decoder a decoder.</li>
+      <li>Wrap in LayerNorm + MLP + residuals. Stack. Train.</li>
+    </ul>
+
+    <p>Next up: how a Vision Transformer adapts this for images, and what happens when you try to train one without any labels at all.</p>
+
+    <footer class="page-foot">
+      <span><a href="index.html">&larr; Overview</a></span>
+      <span><a href="dino.html">ViT &amp; DINO &rarr;</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>
