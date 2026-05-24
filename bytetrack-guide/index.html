@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ByteTrack &mdash; the boring trick that ate multi-object tracking — ByteTrack &amp; Friends</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>ByteTrack &amp; Friends</a>
+    <div class="links">
+      <a href="index.html" class="active">ByteTrack</a>
+      <a href="alternatives.html">Alternatives &amp; trade-offs</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wide">
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">A short interactive guide</div>
+      <h1>ByteTrack &mdash; the boring trick that ate multi-object tracking</h1>
+      <p class="lead">Most tracking pipelines throw away low-confidence detections. ByteTrack keeps them &mdash; and uses them in a second matching pass. That&rsquo;s essentially the whole idea. This page is about why such a small change beat everything else in 2022.</p>
+    </header>
+
+    <h2>The problem</h2>
+    <p>You have an object detector. It runs on every frame of a video and spits out a list of bounding boxes: a person here, a person there, maybe a confidence score next to each one. <em>Multi-object tracking</em> (MOT) is the next step &mdash; assigning each box a stable identity over time, so that the person walking left is the <em>same</em> person in frame 50 and frame 51 and frame 100.</p>
+    <p>This sounds easy. It is not. Detectors blink: they hit the person at 0.9 confidence in one frame, drop them to 0.3 in the next when they get partly occluded, and rediscover them at 0.8 once they emerge. If you only listen to high-confidence detections, you lose the track during occlusion. If you listen to all detections, you drown in noise. Most of MOT&rsquo;s history is about how to make that trade-off well.</p>
+
+    <h2>The standard pipeline (and what&rsquo;s wrong with it)</h2>
+    <p>The dominant family is <em>tracking-by-detection</em>, and the standard recipe looks like this:</p>
+    <ol>
+      <li>Run the detector on frame <em>t</em>. Drop everything below some score threshold (typically 0.5).</li>
+      <li>For each existing track, use a Kalman filter to predict where its box should be in frame <em>t</em>.</li>
+      <li>Match predicted tracks to surviving detections by IoU and the Hungarian algorithm.</li>
+      <li>Unmatched detections become new tracks. Unmatched tracks get killed after a few frames.</li>
+    </ol>
+
+    <details>
+      <summary>How exactly the Kalman filter is used in step 2</summary>
+      <p>Every track in the system owns its own Kalman filter instance &mdash; its own state vector and its own covariance matrix &mdash; created at track birth from the first detection that produced it. The filter has a <em>predict</em> step and an <em>update</em> step, and the MOT loop uses them at different moments:</p>
+      <ul>
+        <li><strong>Predict runs every frame, for every track, unconditionally.</strong> Even if a track had no detection last frame, predict still advances its position by the last known velocity and inflates the covariance by the process noise. The output is a <em>predicted box</em> for this frame &mdash; not the last matched box, but where the filter thinks the object <em>should be</em> right now.</li>
+        <li><strong>Update runs only when the track is matched.</strong> The matched detection&rsquo;s box becomes the observation <em>z</em>, the Kalman gain blends it into the state, and the covariance shrinks because we just got fresh evidence.</li>
+      </ul>
+      <p>Two consequences are worth pinning down explicitly:</p>
+      <ul>
+        <li><strong>IoU is computed against the predicted box.</strong> Step 3&rsquo;s Hungarian cost matrix uses the predict-step output as the track&rsquo;s position &mdash; not the previous frame&rsquo;s matched box. This is what makes IoU matching survive fast motion at all: the prediction has already moved the box forward by one frame of velocity before we compare it to detections.</li>
+        <li><strong>During occlusion, predict still runs.</strong> If a track is lost for a few frames, it keeps coasting forward on its last velocity, with its covariance growing each frame. This is exactly what lets ByteTrack&rsquo;s second pass work later: by the time a partly-occluded object reappears as a low-score detection, the predicted box is usually still in roughly the right place, so the IoU is non-zero and the Hungarian can find the match.</li>
+      </ul>
+      <p>The full update equations and ByteTrack&rsquo;s specific 8-dimensional state vector live in the <a href="#motion-model">motion model collapsible</a> below.</p>
+    </details>
+
+    <p>The bug hiding in step 1 is the headline of the ByteTrack paper. The instant you drop a detection because its score is 0.3, you&rsquo;ve thrown away exactly the kind of box that matters most for tracking: a real object that the detector got <em>almost</em> right, usually because it&rsquo;s partly occluded or out of focus. These are the moments a tracker should care about &mdash; they&rsquo;re where IDs get lost.</p>
+
+    <div class="callout">
+      <div class="label">The key insight</div>
+      <p>Low-score detections aren&rsquo;t background &mdash; they&rsquo;re usually <em>occluded objects</em>. Don&rsquo;t throw them away; use them, but only after you&rsquo;ve resolved the easy cases first.</p>
+    </div>
+
+    <h2>BYTE: two passes, one new idea</h2>
+    <p>ByteTrack&rsquo;s association strategy &mdash; the part the paper calls <em>BYTE</em> &mdash; replaces step 3 above with a two-pass match:</p>
+    <ol>
+      <li><strong>Pass 1 (high-confidence).</strong> Match the high-score detections (score &ge; <em>&tau;<span class="small">high</span></em>, default 0.6) to all existing tracks by IoU + Hungarian. This handles the easy frames where every object is clearly visible.</li>
+      <li><strong>Pass 2 (low-confidence rescue).</strong> Take the <em>tracks that didn&rsquo;t get matched</em> in pass 1 &mdash; these are tracks the detector seems to have lost. Try to match them against the <em>low-score</em> detections (between <em>&tau;<span class="small">low</span></em>, default 0.1, and <em>&tau;<span class="small">high</span></em>). If a track has a plausible low-score box at roughly the right place, keep it alive.</li>
+    </ol>
+    <p>Unmatched high-score detections become new tracks. Unmatched tracks after both passes go into a &ldquo;lost&rdquo; state and get deleted after <strong>30 frames</strong> (one second at 30 fps). Low-score detections that nobody claims are silently dropped &mdash; they were probably background.</p>
+
+    <figure>
+      <svg viewBox="0 0 760 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two-pass association: high-score detections match tracks in pass 1; unmatched tracks then try to match low-score detections in pass 2">
+        <defs>
+          <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#1f5f7a"/>
+          </marker>
+          <marker id="arrwarm" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#d97757"/>
+          </marker>
+        </defs>
+
+        <!-- Pass 1 title -->
+        <text x="200" y="22" text-anchor="middle" font-family="ui-serif, Georgia" font-style="italic" font-size="14" fill="#3a3a3a">Pass 1 &mdash; high-score detections vs. all tracks</text>
+
+        <!-- High-score detections -->
+        <rect x="40" y="50" width="120" height="32" rx="4" fill="#d8e3d5" stroke="#6b8e6f"/>
+        <text x="100" y="71" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="13" fill="#2e4630">high-score D&#8321;</text>
+        <rect x="40" y="90" width="120" height="32" rx="4" fill="#d8e3d5" stroke="#6b8e6f"/>
+        <text x="100" y="111" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="13" fill="#2e4630">high-score D&#8322;</text>
+        <rect x="40" y="130" width="120" height="32" rx="4" fill="#d8e3d5" stroke="#6b8e6f"/>
+        <text x="100" y="151" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="13" fill="#2e4630">high-score D&#8323;</text>
+
+        <!-- Tracks -->
+        <rect x="240" y="50" width="120" height="32" rx="4" fill="#fff" stroke="#6b6b6b" stroke-dasharray="4 3"/>
+        <text x="300" y="71" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="13" fill="#3a3a3a">track T&#8321;</text>
+        <rect x="240" y="90" width="120" height="32" rx="4" fill="#fff" stroke="#6b6b6b" stroke-dasharray="4 3"/>
+        <text x="300" y="111" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="13" fill="#3a3a3a">track T&#8322;</text>
+        <rect x="240" y="130" width="120" height="32" rx="4" fill="#fff" stroke="#6b6b6b" stroke-dasharray="4 3"/>
+        <text x="300" y="151" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="13" fill="#3a3a3a">track T&#8323;</text>
+
+        <!-- Pass 1 matches -->
+        <path d="M160,66 L240,66" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr)"/>
+        <path d="M160,106 L240,146" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr)"/>
+
+        <!-- Pass 1 outcomes label -->
+        <text x="490" y="40" font-family="ui-serif, Georgia" font-size="13" fill="#163f52">after pass 1:</text>
+        <text x="490" y="62" font-family="-apple-system, sans-serif" font-size="13" fill="#2e4630">&#10003; T&#8321; matched to D&#8321;</text>
+        <text x="490" y="82" font-family="-apple-system, sans-serif" font-size="13" fill="#2e4630">&#10003; T&#8323; matched to D&#8322;</text>
+        <text x="490" y="102" font-family="-apple-system, sans-serif" font-size="13" fill="#8a3f1e">&#x2192; T&#8322; unmatched</text>
+        <text x="490" y="122" font-family="-apple-system, sans-serif" font-size="13" fill="#2e4630">&#x2192; D&#8323; spawns new track</text>
+
+        <!-- Divider -->
+        <line x1="20" y1="195" x2="740" y2="195" stroke="#e6e1d4" stroke-width="1"/>
+
+        <!-- Pass 2 title -->
+        <text x="200" y="218" text-anchor="middle" font-family="ui-serif, Georgia" font-style="italic" font-size="14" fill="#3a3a3a">Pass 2 &mdash; rescue T&#8322; with low-score detections</text>
+
+        <!-- Low-score detections -->
+        <rect x="40" y="240" width="120" height="32" rx="4" fill="#f6dccc" stroke="#d97757"/>
+        <text x="100" y="261" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="13" fill="#5a2a10">low-score D&#8324;</text>
+        <rect x="40" y="280" width="120" height="32" rx="4" fill="#f6dccc" stroke="#d97757"/>
+        <text x="100" y="301" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="13" fill="#5a2a10">low-score D&#8325;</text>
+
+        <!-- Unmatched track from pass 1 -->
+        <rect x="240" y="260" width="120" height="32" rx="4" fill="#fef3c7" stroke="#6b6b6b" stroke-dasharray="4 3"/>
+        <text x="300" y="281" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="13" fill="#3a3a3a">track T&#8322; (lost?)</text>
+
+        <!-- Pass 2 match -->
+        <path d="M160,256 L240,276" fill="none" stroke="#d97757" stroke-width="1.5" marker-end="url(#arrwarm)"/>
+
+        <!-- Pass 2 outcomes -->
+        <text x="490" y="240" font-family="ui-serif, Georgia" font-size="13" fill="#5a2a10">after pass 2:</text>
+        <text x="490" y="262" font-family="-apple-system, sans-serif" font-size="13" fill="#2e4630">&#10003; T&#8322; saved by D&#8324;</text>
+        <text x="490" y="282" font-family="-apple-system, sans-serif" font-size="13" fill="#6b6b6b">&#x2026; D&#8325; dropped (no taker)</text>
+
+        <!-- Final note -->
+        <text x="380" y="340" text-anchor="middle" font-family="ui-serif, Georgia" font-style="italic" font-size="13" fill="#6b6b6b">High scores resolve the easy cases first. Low scores only get a turn against tracks that still need help.</text>
+      </svg>
+      <figcaption>Two passes, one frame. The whole &ldquo;ByteTrack idea&rdquo; fits in this picture.</figcaption>
+    </figure>
+
+    <h2>What this is <em>not</em> doing</h2>
+    <p>It&rsquo;s worth being explicit about what ByteTrack doesn&rsquo;t use, because the absences are surprising:</p>
+    <ul>
+      <li><strong>No appearance features.</strong> No Re-ID network, no embedding similarity, no &ldquo;does this box look like that box&rdquo;. Pure motion + IoU.</li>
+      <li><strong>No deep matching network.</strong> The matching cost is just <em>1 &minus; IoU</em>. The Hungarian algorithm is from 1955.</li>
+      <li><strong>No long-term memory.</strong> A track that&rsquo;s lost for more than 30 frames is gone. When it reappears, it gets a new ID.</li>
+    </ul>
+    <p>The paper&rsquo;s claim is that you can drop all of those pieces and still beat methods that include them &mdash; <span class="hl">as long as your detector is good enough</span> that the low-score boxes are mostly real objects rather than hallucinations. That caveat does a lot of work, and we&rsquo;ll come back to it on the <a href="alternatives.html#cons">next page</a>.</p>
+
+    <h2 id="motion-model">The motion model</h2>
+    <p>The Kalman filter is identical to the one in SORT, which is identical to the one used by half the trackers on this planet. The state is eight-dimensional: <em>(x, y, a, h, v<span class="small">x</span>, v<span class="small">y</span>, v<span class="small">a</span>, v<span class="small">h</span>)</em>, where <em>(x, y)</em> is the box center, <em>a</em> the aspect ratio, <em>h</em> the height, and the four <em>v</em>&rsquo;s are their time derivatives. The model assumes constant velocity between frames and updates each track&rsquo;s state every time a detection lands on it.</p>
+
+    <details>
+      <summary>The Kalman update in full (mostly here for completeness)</summary>
+      <p>Let <em>x<span class="small">k|k&minus;1</span></em> be the predicted state and <em>P<span class="small">k|k&minus;1</span></em> its covariance. With observation <em>z<span class="small">k</span></em> (a measured bounding box) and measurement matrix <em>H</em>:</p>
+      <p class="eq">y<span class="small">k</span> = z<span class="small">k</span> &minus; H x<span class="small">k|k&minus;1</span> &nbsp;&nbsp;&nbsp;&nbsp; (innovation)</p>
+      <p class="eq">S<span class="small">k</span> = H P<span class="small">k|k&minus;1</span> H<span class="top">&#8868;</span> + R &nbsp;&nbsp;&nbsp;&nbsp; (innovation covariance)</p>
+      <p class="eq">K<span class="small">k</span> = P<span class="small">k|k&minus;1</span> H<span class="top">&#8868;</span> S<span class="small">k</span><span class="top">&minus;1</span> &nbsp;&nbsp;&nbsp;&nbsp; (Kalman gain)</p>
+      <p class="eq">x<span class="small">k|k</span> = x<span class="small">k|k&minus;1</span> + K<span class="small">k</span> y<span class="small">k</span> &nbsp;&nbsp;&nbsp;&nbsp; (updated state)</p>
+      <p class="eq">P<span class="small">k|k</span> = (I &minus; K<span class="small">k</span> H) P<span class="small">k|k&minus;1</span> &nbsp;&nbsp;&nbsp;&nbsp; (updated covariance)</p>
+      <p>For ByteTrack, <em>R</em> is scaled by box height to model the fact that big confident boxes have more reliable centers than small ones &mdash; a SORT detail inherited wholesale.</p>
+    </details>
+
+    <h2>Track lifecycle</h2>
+    <p>Tracks live one of three lives in any given frame:</p>
+    <div class="two-col">
+      <div>
+        <h3>Tracked</h3>
+        <p>The track was matched to a detection this frame. Kalman state updated, ID kept. The happy case.</p>
+        <h3>Lost</h3>
+        <p>The track wasn&rsquo;t matched this frame, neither in pass 1 nor pass 2. It stays in &ldquo;lost&rdquo; for up to 30 frames, with its Kalman state coasting forward by prediction alone. A later frame can still rescue it.</p>
+      </div>
+      <div>
+        <h3>Removed</h3>
+        <p>The track has been lost for more than 30 frames. It&rsquo;s deleted. If the same physical object reappears later, it gets a brand new ID &mdash; ByteTrack has no concept of &ldquo;wait, isn&rsquo;t that the person from earlier?&rdquo;.</p>
+        <h3>New</h3>
+        <p>An unmatched high-score detection. ByteTrack is slightly conservative here: a new track has to survive a couple of frames as &ldquo;tentative&rdquo; before it&rsquo;s confirmed, to avoid spawning IDs on every detector glitch.</p>
+      </div>
+    </div>
+
+    <details>
+      <summary>Pseudocode (Algorithm 1 from the paper, condensed)</summary>
+<pre><code>Input:  video V, detector Det, thresholds τ_high, τ_low, IoU thresh ε
+Output: tracks T
+
+T ← ∅
+for each frame f in V:
+    D ← Det(f)
+    D_high ← { d ∈ D : score(d) ≥ τ_high }
+    D_low  ← { d ∈ D : τ_low ≤ score(d) &lt; τ_high }
+
+    # predict every existing track forward with Kalman
+    for t in T:  t.state ← KalmanPredict(t.state)
+
+    # Pass 1: high-score detections vs. all tracks
+    M1, T_unmatched, D_high_unmatched ← Match(T, D_high, IoU, ε)
+    update tracks in M1 with their matched detection
+
+    # Pass 2: unmatched tracks vs. low-score detections
+    M2, T_lost, _ ← Match(T_unmatched, D_low, IoU, ε_pass2)
+    update tracks in M2
+
+    # birth / death
+    for d in D_high_unmatched: T ← T ∪ { new tentative track from d }
+    for t in T_lost: mark t lost; if lost &gt; max_age, remove t
+
+return T
+</code></pre>
+      <p>One detail the prose above glosses over: the IoU threshold for pass 2 is slightly looser than pass 1, because the box from a partly-occluded object can have shifted geometry that wouldn&rsquo;t pass a strict IoU bar.</p>
+    </details>
+
+    <h2>The numbers</h2>
+    <p>On the standard MOT17 test set, with YOLOX-X as the detector, ByteTrack reports:</p>
+    <ul>
+      <li><strong>MOTA 80.3</strong> &mdash; combined accuracy metric, dominated by detection quality.</li>
+      <li><strong>IDF1 77.3</strong> &mdash; identity-preservation metric, dominated by association quality.</li>
+      <li><strong>HOTA 63.1</strong> &mdash; a more balanced metric that doesn&rsquo;t let detection drown out association.</li>
+      <li><strong>~30 FPS</strong> on a single V100, end-to-end with the detector.</li>
+    </ul>
+    <p>For context: at the time of publication, those numbers were the best ever reported on MOT17 by a public method, and ByteTrack was simultaneously the fastest of the top-10. The combination is the reason it became the default association layer for half a dozen subsequent trackers.</p>
+
+    <details>
+      <summary>What the metrics actually mean (MOTA, IDF1, HOTA)</summary>
+      <p><strong>MOTA</strong> (Multi-Object Tracking Accuracy) penalises false positives, false negatives, and ID switches, normalised by the number of ground-truth boxes. It&rsquo;s easy to push up by improving the detector; an excellent detector with a terrible tracker still scores well. This is its main weakness as a benchmark.</p>
+      <p><strong>IDF1</strong> measures how well identities are preserved across the whole video, using the F1 score of correctly-identified detections under the best ID assignment. It&rsquo;s much more sensitive to ID switches and rewards trackers that maintain long-term identity.</p>
+      <p><strong>HOTA</strong> (Higher-Order Tracking Accuracy, Luiten et al. 2021) was designed to balance detection and association in one number, by factoring the score as the geometric mean of localization, detection, and association components. Most modern MOT papers report it because it&rsquo;s harder to game than MOTA.</p>
+    </details>
+
+    <h2>Why this paper works as a paper</h2>
+    <p>The reason ByteTrack got the citations it did isn&rsquo;t just &ldquo;use low-score boxes&rdquo;. It&rsquo;s that the experimental section is honest about the recipe: most of the gain comes from BYTE association, but a meaningful fraction comes from <em>using a strong detector</em>. The paper runs BYTE on top of multiple detectors and shows the relative gain is consistent. So the contribution isn&rsquo;t &ldquo;here&rsquo;s a magical tracker&rdquo; &mdash; it&rsquo;s &ldquo;here&rsquo;s a 30-line change to your association step that probably wins.&rdquo; That&rsquo;s a much easier sell.</p>
+
+    <div class="callout warm">
+      <div class="label">What &ldquo;BYTE&rdquo; even means</div>
+      <p>From the paper: &ldquo;each detection box is a basic unit of the tracklet, as byte in computer program&rdquo;. It&rsquo;s not an acronym. It&rsquo;s a metaphor about treating every detection as a load-bearing piece of information rather than throwing most of them away.</p>
+    </div>
+
+    <h2>References</h2>
+    <ul>
+      <li>Zhang, Sun, Jiang, Yu, Weng, Yuan, Luo, Liu, Wang. <em>ByteTrack: Multi-Object Tracking by Associating Every Detection Box.</em> ECCV 2022. <a href="https://arxiv.org/abs/2110.06864">arXiv:2110.06864</a>.</li>
+      <li>Official implementation: <a href="https://github.com/ifzhang/ByteTrack">github.com/ifzhang/ByteTrack</a>.</li>
+      <li>Bewley et al. <em>SORT.</em> ICIP 2016 &mdash; the ancestor whose Kalman filter ByteTrack reuses.</li>
+      <li>Luiten et al. <em>HOTA: A Higher Order Metric for Evaluating Multi-Object Tracking.</em> IJCV 2021.</li>
+    </ul>
+
+    <footer class="page-foot">
+      <span>ByteTrack &amp; Friends</span>
+      <span><a href="alternatives.html">Next: Alternatives &amp; trade-offs &rarr;</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>

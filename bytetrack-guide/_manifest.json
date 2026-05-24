@@ -1,0 +1,19 @@
+{
+  "title": "ByteTrack &amp; Friends",
+  "pages": [
+    {
+      "slug": "index",
+      "nav_label": "ByteTrack",
+      "eyebrow": "A short interactive guide",
+      "h1": "ByteTrack &mdash; the boring trick that ate multi-object tracking",
+      "lead": "Most tracking pipelines throw away low-confidence detections. ByteTrack keeps them &mdash; and uses them in a second matching pass. That&rsquo;s essentially the whole idea. This page is about why such a small change beat everything else in 2022."
+    },
+    {
+      "slug": "alternatives",
+      "nav_label": "Alternatives &amp; trade-offs",
+      "eyebrow": "Context",
+      "h1": "What ByteTrack is competing with",
+      "lead": "ByteTrack didn&rsquo;t arrive in a vacuum. SORT, DeepSORT, FairMOT, OC-SORT, BoT-SORT, StrongSORT &mdash; each one is a different answer to &ldquo;how do you keep an ID stable when the detector flickers?&rdquo; This page is a map of that landscape and an honest take on where ByteTrack wins, where it loses, and what to reach for instead."
+    }
+  ]
+}

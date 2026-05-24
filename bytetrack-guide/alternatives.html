@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>What ByteTrack is competing with — ByteTrack &amp; Friends</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>ByteTrack &amp; Friends</a>
+    <div class="links">
+      <a href="index.html">ByteTrack</a>
+      <a href="alternatives.html" class="active">Alternatives &amp; trade-offs</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">Context</div>
+      <h1>What ByteTrack is competing with</h1>
+      <p class="lead">ByteTrack didn&rsquo;t arrive in a vacuum. SORT, DeepSORT, FairMOT, OC-SORT, BoT-SORT, StrongSORT &mdash; each one is a different answer to &ldquo;how do you keep an ID stable when the detector flickers?&rdquo; This page is a map of that landscape and an honest take on where ByteTrack wins, where it loses, and what to reach for instead.</p>
+    </header>
+
+    <h2>The family tree</h2>
+    <p>If you squint at the MOT literature from 2016 onwards, you see two lineages running in parallel. One is the &ldquo;motion only, keep it simple&rdquo; branch that starts with SORT and produces ByteTrack and OC-SORT. The other is the &ldquo;add appearance features for robustness&rdquo; branch that starts with DeepSORT and produces FairMOT, StrongSORT, and BoT-SORT. The newest entrants &mdash; MOTR, TrackFormer &mdash; try to throw out the whole tracking-by-detection scaffold and do everything end-to-end with transformers. It hasn&rsquo;t fully worked yet.</p>
+
+    <figure>
+      <svg viewBox="0 0 760 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Family tree of MOT methods from 2016 to 2023, split into motion-only and appearance-based branches">
+        <defs>
+          <marker id="tArr" markerWidth="9" markerHeight="9" refX="7" refY="4.5" orient="auto">
+            <path d="M0,0 L9,4.5 L0,9 Z" fill="#6b6b6b"/>
+          </marker>
+        </defs>
+        <!-- Timeline axis -->
+        <line x1="30" y1="210" x2="730" y2="210" stroke="#6b6b6b" stroke-width="1"/>
+        <text x="60"  y="228" text-anchor="middle" font-family="ui-serif, Georgia" font-size="12" fill="#6b6b6b">2016</text>
+        <text x="180" y="228" text-anchor="middle" font-family="ui-serif, Georgia" font-size="12" fill="#6b6b6b">2017</text>
+        <text x="300" y="228" text-anchor="middle" font-family="ui-serif, Georgia" font-size="12" fill="#6b6b6b">2020</text>
+        <text x="420" y="228" text-anchor="middle" font-family="ui-serif, Georgia" font-size="12" fill="#6b6b6b">2022</text>
+        <text x="600" y="228" text-anchor="middle" font-family="ui-serif, Georgia" font-size="12" fill="#6b6b6b">2023</text>
+
+        <!-- Motion-only branch (top) -->
+        <text x="20" y="40" font-family="ui-serif, Georgia" font-style="italic" font-size="12" fill="#1f5f7a">motion-only</text>
+        <rect x="35" y="55" width="60" height="32" rx="4" fill="#d4e7ec" stroke="#1f5f7a"/>
+        <text x="65" y="76" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#163f52">SORT</text>
+
+        <rect x="395" y="55" width="80" height="32" rx="4" fill="#1f5f7a"/>
+        <text x="435" y="76" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#fff" font-weight="600">ByteTrack</text>
+
+        <rect x="570" y="55" width="80" height="32" rx="4" fill="#d4e7ec" stroke="#1f5f7a"/>
+        <text x="610" y="76" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#163f52">OC-SORT</text>
+
+        <path d="M95,71 L395,71" fill="none" stroke="#6b6b6b" stroke-width="1.2" marker-end="url(#tArr)"/>
+        <path d="M475,71 L570,71" fill="none" stroke="#6b6b6b" stroke-width="1.2" marker-end="url(#tArr)"/>
+
+        <!-- Appearance branch (bottom) -->
+        <text x="20" y="125" font-family="ui-serif, Georgia" font-style="italic" font-size="12" fill="#8a3f1e">+ appearance</text>
+        <rect x="155" y="140" width="80" height="32" rx="4" fill="#f6dccc" stroke="#d97757"/>
+        <text x="195" y="161" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#5a2a10">DeepSORT</text>
+
+        <rect x="275" y="140" width="80" height="32" rx="4" fill="#f6dccc" stroke="#d97757"/>
+        <text x="315" y="161" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#5a2a10">FairMOT</text>
+
+        <rect x="510" y="140" width="80" height="32" rx="4" fill="#f6dccc" stroke="#d97757"/>
+        <text x="550" y="161" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#5a2a10">BoT-SORT</text>
+
+        <rect x="600" y="140" width="100" height="32" rx="4" fill="#f6dccc" stroke="#d97757"/>
+        <text x="650" y="161" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="12" fill="#5a2a10">StrongSORT</text>
+
+        <path d="M95,87 C95,120 155,140 155,156" fill="none" stroke="#6b6b6b" stroke-width="1.2" marker-end="url(#tArr)"/>
+        <path d="M235,156 L275,156" fill="none" stroke="#6b6b6b" stroke-width="1.2" marker-end="url(#tArr)"/>
+
+        <!-- ByteTrack feeds into BoT-SORT (cross-pollination) -->
+        <path d="M435,87 C435,120 510,140 510,156" fill="none" stroke="#1f5f7a" stroke-width="1.2" stroke-dasharray="3 3" marker-end="url(#tArr)"/>
+
+        <!-- End-to-end branch (far right, small) -->
+        <text x="710" y="125" text-anchor="end" font-family="ui-serif, Georgia" font-style="italic" font-size="12" fill="#3f5a40">end-to-end transformer</text>
+        <rect x="680" y="100" width="60" height="22" rx="4" fill="#d8e3d5" stroke="#6b8e6f"/>
+        <text x="710" y="115" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="11" fill="#2e4630">MOTR</text>
+      </svg>
+      <figcaption>The dashed arrow is the interesting one: BoT-SORT explicitly borrows ByteTrack&rsquo;s association and bolts appearance onto it.</figcaption>
+    </figure>
+
+    <div class="callout sage">
+      <div class="label">Coincidence?</div>
+      <p>The lead author of FairMOT (2020) and the lead author of ByteTrack (2022) are the same person: <em>Yifu Zhang</em>. ByteTrack is, in some sense, FairMOT&rsquo;s author publicly conceding that a strong detector with a stupid association beats a fancy joint detection-plus-Re-ID network. Refreshing.</p>
+    </div>
+
+    <h2 id="alternatives">The methods, one at a time</h2>
+
+    <h3 id="sort">SORT (2016)</h3>
+    <p>Bewley, Ge, Ott, Ramos, Upcroft. <em>Simple Online and Realtime Tracking.</em> ICIP 2016.</p>
+    <p>The ancestor. Detector + Kalman + IoU + Hungarian, no learning, no appearance. About 50 lines of code. SORT&rsquo;s contribution was less &ldquo;here&rsquo;s a great tracker&rdquo; and more &ldquo;here&rsquo;s how clean the tracking-by-detection skeleton can be if you trust your detector.&rdquo; ByteTrack&rsquo;s Kalman filter, state vector, and Hungarian step are essentially SORT&rsquo;s &mdash; the only thing ByteTrack changed is what gets fed into them.</p>
+    <p><strong>When SORT wins:</strong> the detector is excellent and the scene is sparse. Then nothing beats its simplicity.</p>
+    <p><strong>When SORT loses:</strong> any meaningful occlusion. A track drops the moment its detection drops below the score threshold, with no chance to recover.</p>
+
+    <h3 id="deepsort">DeepSORT (2017)</h3>
+    <p>Wojke, Bewley, Paulus. <em>Simple Online and Realtime Tracking with a Deep Association Metric.</em> ICIP 2017.</p>
+    <p>The fix to SORT&rsquo;s occlusion problem &mdash; from a different angle than ByteTrack would take five years later. DeepSORT trains a small CNN to embed each detection into a feature vector, then matches tracks to detections by a combination of IoU <em>and</em> cosine similarity in that feature space. Each track maintains a gallery of recent embeddings, so a person who was lost for ten frames can be recognised when they reappear, as long as they look similar.</p>
+    <p><strong>When DeepSORT wins:</strong> long occlusions where appearance is stable (same outfit, similar lighting). The Re-ID gallery lets it bridge gaps ByteTrack can&rsquo;t.</p>
+    <p><strong>When DeepSORT loses:</strong> appearance is unreliable &mdash; uniformed teams, dim lighting, motion blur. The Re-ID network was also trained on a specific dataset and tends to generalise poorly to domains very different from pedestrians.</p>
+
+    <h3 id="fairmot">FairMOT (2020)</h3>
+    <p>Zhang, Wang, Wang, Zeng, Liu. <em>FairMOT.</em> arXiv 2020; IJCV 2021.</p>
+    <p>The &ldquo;why are detection and Re-ID two networks&rdquo; argument. FairMOT shares a single anchor-free backbone (CenterNet-style) with two heads: one that produces detection boxes, one that produces a Re-ID embedding per detected center. Training is joint, which the paper argues is &ldquo;fair&rdquo; in the sense that both tasks get equal weight on the shared features.</p>
+    <p><strong>When FairMOT wins:</strong> domains where you genuinely have Re-ID training data and want a single-model pipeline.</p>
+    <p><strong>When FairMOT loses:</strong> crowded scenes &mdash; the anchor-free heatmap struggles with many overlapping centers &mdash; and any domain where you don&rsquo;t have appearance labels. ByteTrack matches or beats it on most public MOT benchmarks with far less machinery.</p>
+
+    <h3 id="ocsort">OC-SORT (2023)</h3>
+    <p>Cao, Pang, Yu, et al. <em>Observation-Centric SORT.</em> CVPR 2023.</p>
+    <p>The sibling-of-ByteTrack on the motion-only branch. OC-SORT attacks a different problem: SORT&rsquo;s Kalman filter drifts during occlusions because it has no observations to correct it, and the drift compounds. When the object reappears, the filter is in the wrong place and the IoU match fails. OC-SORT&rsquo;s fix is to construct a &ldquo;virtual&rdquo; observation trajectory from the object&rsquo;s last known position to its current detected position, then re-run the Kalman update along that trajectory to correct the accumulated error.</p>
+    <p>It also runs <em>hundreds</em> of FPS on CPU. It is genuinely fast.</p>
+    <p><strong>When OC-SORT wins:</strong> non-linear motion (dancers, animals, balls), long occlusions, CPU-only deployments.</p>
+    <p><strong>When OC-SORT loses:</strong> when an appearance signal would&rsquo;ve actually helped. Like ByteTrack, it&rsquo;s blind to identity.</p>
+
+    <h3 id="botsort">BoT-SORT (2022)</h3>
+    <p>Aharon, Orfaig, Bobrovsky. <em>BoT-SORT.</em> arXiv 2022 (preprint &mdash; no peer-reviewed venue, worth knowing).</p>
+    <p>ByteTrack with the obvious extensions bolted on. BoT-SORT keeps the two-pass association, adds a Re-ID embedding for appearance matching, switches the Kalman state to 8D in image coordinates plus an explicit camera-motion compensation step (so the Kalman doesn&rsquo;t get fooled by camera pan), and uses a slightly tuned IoU metric. The result was state-of-the-art on MOT17 and MOT20 in 2022.</p>
+    <p><strong>When BoT-SORT wins:</strong> moving cameras, crowded scenes, anywhere you want ByteTrack&rsquo;s structure plus a Re-ID safety net.</p>
+    <p><strong>When BoT-SORT loses:</strong> when the extra complexity isn&rsquo;t worth it. You need a working Re-ID model and the camera-compensation step is fragile to wide-angle distortion.</p>
+
+    <h3 id="strongsort">StrongSORT (2023)</h3>
+    <p>Du, Zhao, Song, et al. <em>StrongSORT.</em> IEEE TMM 2023.</p>
+    <p>DeepSORT brought into 2023. Same skeleton, newer parts: a stronger detector (YOLOX), a much better Re-ID network (BoT), camera motion compensation via ECC, and a &ldquo;noise-scale-adaptive&rdquo; (NSA) Kalman update that scales measurement noise by detection confidence. It&rsquo;s essentially &ldquo;take everything we learned in five years and put it back in DeepSORT&rdquo;.</p>
+    <p><strong>When StrongSORT wins:</strong> moving-camera scenarios where appearance is stable enough to help. It&rsquo;s often the most accurate non-end-to-end method.</p>
+    <p><strong>When StrongSORT loses:</strong> latency-sensitive applications. It&rsquo;s the heaviest method in this list.</p>
+
+    <h3 id="motr">MOTR &amp; the end-to-end attempt</h3>
+    <p>Zeng et al. <em>MOTR.</em> ECCV 2022. <em>MOTRv2.</em> ICCV 2023.</p>
+    <p>The transformer-based pitch: detection and association are not two problems, they&rsquo;re one problem, and a sequence-to-sequence model with persistent object queries can solve them jointly. Each track is a query that persists across frames; the model attends over the image and updates the query, producing the box for that ID in the current frame. No Hungarian algorithm, no Kalman filter &mdash; just attention.</p>
+    <p>The first MOTR underperformed tracking-by-detection on standard benchmarks. MOTRv2 closed the gap by using a separate pretrained detector to bootstrap detection &mdash; which, if you squint, is partway back to tracking-by-detection. The jury is still out.</p>
+
+    <h2 id="compare">Comparison at a glance</h2>
+    <table style="width:100%; border-collapse: collapse; margin: 16px 0; font-size: 14.5px;">
+      <thead>
+        <tr style="border-bottom: 2px solid var(--rule); text-align: left;">
+          <th style="padding: 8px 6px;">Method</th>
+          <th style="padding: 8px 6px;">Year</th>
+          <th style="padding: 8px 6px;">Appearance?</th>
+          <th style="padding: 8px 6px;">Headline strength</th>
+          <th style="padding: 8px 6px;">Headline weakness</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;">SORT</td>
+          <td style="padding: 8px 6px;">2016</td>
+          <td style="padding: 8px 6px;">no</td>
+          <td style="padding: 8px 6px;">trivially simple, fast</td>
+          <td style="padding: 8px 6px;">drops at first occlusion</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;">DeepSORT</td>
+          <td style="padding: 8px 6px;">2017</td>
+          <td style="padding: 8px 6px;">yes (Re-ID)</td>
+          <td style="padding: 8px 6px;">long occlusions via embedding gallery</td>
+          <td style="padding: 8px 6px;">fragile to appearance drift</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;">FairMOT</td>
+          <td style="padding: 8px 6px;">2020</td>
+          <td style="padding: 8px 6px;">yes (joint)</td>
+          <td style="padding: 8px 6px;">single-network joint training</td>
+          <td style="padding: 8px 6px;">crowded scenes, anchor-free fragility</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--rule); background: var(--accent-soft);">
+          <td style="padding: 8px 6px;"><strong>ByteTrack</strong></td>
+          <td style="padding: 8px 6px;">2022</td>
+          <td style="padding: 8px 6px;"><strong>no</strong></td>
+          <td style="padding: 8px 6px;">low-score boxes save tracks under occlusion</td>
+          <td style="padding: 8px 6px;">no Re-ID, no long-term memory</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;">OC-SORT</td>
+          <td style="padding: 8px 6px;">2023</td>
+          <td style="padding: 8px 6px;">no</td>
+          <td style="padding: 8px 6px;">non-linear motion, CPU-fast</td>
+          <td style="padding: 8px 6px;">still no appearance signal</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;">BoT-SORT</td>
+          <td style="padding: 8px 6px;">2022</td>
+          <td style="padding: 8px 6px;">yes (Re-ID)</td>
+          <td style="padding: 8px 6px;">ByteTrack + appearance + camera compensation</td>
+          <td style="padding: 8px 6px;">arXiv-only, more moving parts</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;">StrongSORT</td>
+          <td style="padding: 8px 6px;">2023</td>
+          <td style="padding: 8px 6px;">yes (Re-ID)</td>
+          <td style="padding: 8px 6px;">modernised DeepSORT, often most accurate</td>
+          <td style="padding: 8px 6px;">slowest, heaviest</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 6px;">MOTR</td>
+          <td style="padding: 8px 6px;">2022/23</td>
+          <td style="padding: 8px 6px;">implicit (attention)</td>
+          <td style="padding: 8px 6px;">end-to-end, no Hungarian</td>
+          <td style="padding: 8px 6px;">slow, still behind on benchmarks</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2 id="pros">Where ByteTrack is genuinely good</h2>
+    <p>The headline &mdash; &ldquo;use low-score boxes&rdquo; &mdash; gets disproportionate attention. The understated wins matter more in practice:</p>
+    <ul>
+      <li><strong>No Re-ID training data required.</strong> If you&rsquo;re tracking forklifts or fish or surgical tools, you probably don&rsquo;t have an appearance-labelled dataset. ByteTrack doesn&rsquo;t need one.</li>
+      <li><strong>Detector-portable.</strong> Swap YOLOX for YOLOv8 or RT-DETR or your in-house model, and ByteTrack still works (with some threshold retuning). No retraining anything.</li>
+      <li><strong>Cross-domain robustness.</strong> Appearance-based methods overfit subtly to whatever Re-ID dataset they trained on. ByteTrack&rsquo;s &ldquo;just motion&rdquo; design is unusually portable across lighting, viewpoint, and clothing changes.</li>
+      <li><strong>Composable.</strong> BoT-SORT&rsquo;s recipe is &ldquo;ByteTrack + Re-ID&rdquo;, not &ldquo;a new tracker.&rdquo; The BYTE association has become the default data-association layer for half a dozen subsequent methods.</li>
+      <li><strong>Interpretable failure modes.</strong> When ByteTrack drops a track, you can usually point at the frame where the detector failed or the IoU was too low. Compared to a Re-ID network that just &ldquo;decided&rdquo; two boxes weren&rsquo;t the same person, that&rsquo;s a debugger&rsquo;s gift.</li>
+    </ul>
+
+    <h2 id="cons">Where ByteTrack falls down</h2>
+    <p>The honest list. None of these are surprising once you understand the algorithm, but they bite in practice.</p>
+    <ul>
+      <li><strong>Long-term occlusion &gt; 30 frames.</strong> ByteTrack&rsquo;s memory is exactly the lost-track buffer (default 1 second at 30 fps). A person who walks behind a building and reappears five seconds later gets a new ID. Re-ID-based methods can often recover them.</li>
+      <li><strong>Crowded scenes with similar-looking objects.</strong> IoU is ambiguous when boxes overlap heavily. ByteTrack will sometimes swap IDs between two people walking close together; an appearance signal would&rsquo;ve disambiguated.</li>
+      <li><strong>Significant camera motion.</strong> The Kalman filter operates in image coordinates and assumes constant velocity. A camera pan looks like everything in the scene accelerating in lockstep. ByteTrack has no compensation; BoT-SORT and StrongSORT do.</li>
+      <li><strong>Detector dependence.</strong> The whole method assumes that low-score boxes are mostly real objects rather than hallucinations. With a calibrated detector this is true. With a poorly-calibrated detector, the low-score window is mostly garbage and the second pass hurts more than it helps.</li>
+      <li><strong>Threshold sensitivity.</strong> &tau;<span class="small">high</span> and &tau;<span class="small">low</span> need re-tuning per detector and sometimes per scene. The paper&rsquo;s default (0.6 / 0.1) is calibrated for YOLOX on MOT17; your numbers will be different.</li>
+      <li><strong>Non-linear motion.</strong> Constant-velocity Kalman is fine for pedestrians on a sidewalk. It&rsquo;s wrong for tennis balls, dancers, and animals.</li>
+    </ul>
+
+    <h2 id="picking">A short decision guide</h2>
+    <div class="two-col">
+      <div>
+        <h3>Reach for ByteTrack when&hellip;</h3>
+        <ul>
+          <li>You have a good detector and want the simplest tracker that works.</li>
+          <li>The scene is pedestrian-like (consistent motion, modest occlusion).</li>
+          <li>You don&rsquo;t have Re-ID training data.</li>
+          <li>You need a starting point you can extend (it&rsquo;s the base of BoT-SORT).</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Reach for something else when&hellip;</h3>
+        <ul>
+          <li>Long-term ID stability matters &mdash; &rarr; <strong>StrongSORT</strong> or <strong>BoT-SORT</strong>.</li>
+          <li>The camera moves a lot &mdash; &rarr; <strong>BoT-SORT</strong> (camera comp) or <strong>OC-SORT</strong>.</li>
+          <li>Motion is non-linear &mdash; &rarr; <strong>OC-SORT</strong>.</li>
+          <li>You&rsquo;re researching end-to-end methods &mdash; &rarr; <strong>MOTR / MOTRv2</strong>.</li>
+        </ul>
+      </div>
+    </div>
+
+    <h2>Going further</h2>
+    <ul>
+      <li><strong>HOTA, and why MOTA is misleading.</strong> Luiten et al. (IJCV 2021) is the canonical reference; the short version is that MOTA is dominated by detection quality and a tracker can look great just by riding a better detector.</li>
+      <li><strong>3D MOT for autonomous driving.</strong> A different world &mdash; LiDAR detections, 3D Kalman, point-cloud Re-ID. AB3DMOT and CenterPoint+SimpleTrack are reasonable entry points.</li>
+      <li><strong>Tracking by attention.</strong> If end-to-end transformers eventually beat tracking-by-detection on standard benchmarks, MOTRv2 and TrackFormer are the papers to watch.</li>
+      <li><strong>The ByteTrack code itself.</strong> The official repo is small enough to read in an afternoon. The whole BYTE association lives in <code>yolox/tracker/byte_tracker.py</code> &mdash; about 200 lines.</li>
+    </ul>
+
+    <h2>References</h2>
+    <ul>
+      <li>Bewley et al. <em>SORT.</em> ICIP 2016. <a href="https://arxiv.org/abs/1602.00763">arXiv:1602.00763</a></li>
+      <li>Wojke, Bewley, Paulus. <em>DeepSORT.</em> ICIP 2017. <a href="https://arxiv.org/abs/1703.07402">arXiv:1703.07402</a></li>
+      <li>Zhang et al. <em>FairMOT.</em> IJCV 2021. <a href="https://arxiv.org/abs/2004.01888">arXiv:2004.01888</a></li>
+      <li>Zhang et al. <em>ByteTrack.</em> ECCV 2022. <a href="https://arxiv.org/abs/2110.06864">arXiv:2110.06864</a></li>
+      <li>Cao et al. <em>OC-SORT.</em> CVPR 2023. <a href="https://arxiv.org/abs/2203.14360">arXiv:2203.14360</a></li>
+      <li>Aharon, Orfaig, Bobrovsky. <em>BoT-SORT.</em> arXiv 2022. <a href="https://arxiv.org/abs/2206.14651">arXiv:2206.14651</a></li>
+      <li>Du et al. <em>StrongSORT.</em> IEEE TMM 2023. <a href="https://arxiv.org/abs/2202.13514">arXiv:2202.13514</a></li>
+      <li>Zeng et al. <em>MOTR.</em> ECCV 2022. <a href="https://arxiv.org/abs/2105.03247">arXiv:2105.03247</a></li>
+      <li>Luiten et al. <em>HOTA.</em> IJCV 2021. <a href="https://arxiv.org/abs/2009.07736">arXiv:2009.07736</a></li>
+    </ul>
+
+    <footer class="page-foot">
+      <span>ByteTrack &amp; Friends</span>
+      <span><a href="index.html">&larr; Back to overview</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>
