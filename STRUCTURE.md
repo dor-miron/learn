@@ -2,6 +2,8 @@
 
 ## Top-level entries
 
+- `CLAUDE.md` — entry point for AI agents: project purpose + pointer to STRUCTURE.md.
+- `STRUCTURE.md` — this file: the file/folder map with a one-line purpose per entry.
 - `bytetrack-guide/` — Interactive HTML study guide on ByteTrack and the multi-object-tracking landscape.
 - `transformers-guide/` — Interactive HTML study guide ("A Visual Guide to Transformers").
 
