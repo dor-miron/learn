@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Every entry of K, and a knob for each. — Camera Intrinsics, the Linear Model</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>Camera Intrinsics, the Linear Model</a>
+    <div class="links">
+      <a href="index.html">Overview</a>
+      <a href="matrix.html" class="active">The K matrix</a>
+      <a href="transformations.html">Crop, scale, warp</a>
+      <a href="breaking.html">Breaking the model</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">01 · the matrix itself</div>
+      <h1>Every entry of K, and a knob for each.</h1>
+      <p class="lead">K is a 3×3 upper-triangular matrix with five meaningful numbers. Here's what each one physically means — and a live demo where you drag fx, fy, cx, cy, and skew and watch a 3D scene re-project in real time.</p>
+    </header>
+
+    <!-- BODY -->
+
+    <h2>The matrix, and what's actually in it</h2>
+    <p>Here it is. Five numbers that matter, four structural zeros, and a&nbsp;1 in the corner:</p>
+
+    <div class="matrix-wrap" style="margin: 26px 0;">
+      <div class="matrix" aria-label="The intrinsic matrix K">
+        <div class="bracket l"></div>
+        <div class="cells" style="font-size:16px;">
+          <span class="hot">f<sub>x</sub></span><span class="hot">s</span><span class="hot">c<sub>x</sub></span>
+          <span class="zero">0</span><span class="hot">f<sub>y</sub></span><span class="hot">c<sub>y</sub></span>
+          <span class="zero">0</span><span class="zero">0</span><span class="zero">1</span>
+        </div>
+        <div class="bracket r"></div>
+      </div>
+      <div class="mlabel">K — the intrinsic matrix</div>
+    </div>
+
+    <p>It turns the flat <a href="index.html">normalized-plane point</a> <em>(x, y, 1)</em> into a pixel by a single multiply:</p>
+    <p class="eq">u = f<span class="small">x</span>&middot;x + s&middot;y + c<span class="small">x</span> &nbsp;&nbsp;&nbsp; v = f<span class="small">y</span>&middot;y + c<span class="small">y</span></p>
+
+    <p>Read that as two lines of plain algebra. The <em>v</em> equation is a scale-and-shift of <em>y</em>. The <em>u</em> equation is a scale-and-shift of <em>x</em>, <em>plus</em> a little leak from <em>y</em> through the skew term. Every entry has a job:</p>
+
+    <ul>
+      <li><strong><em>f<sub>x</sub>, f<sub>y</sub></em> — focal lengths, in pixels.</strong> How many pixels one unit on the normalized plane spans. Big focal length = narrow field of view = "zoomed in." They differ only when pixels aren't square.</li>
+      <li><strong><em>c<sub>x</sub>, c<sub>y</sub></em> — the principal point, in pixels.</strong> Where the optical axis punches through the sensor. Nominally the image centre, but never exactly, because the sensor is never glued on perfectly.</li>
+      <li><strong><em>s</em> — skew.</strong> A shear term that's non-zero only if the sensor's rows and columns aren't perpendicular. For any camera you'll meet, <em>s</em>&nbsp;=&nbsp;0. It earns its slot in textbooks and almost nowhere else.</li>
+    </ul>
+
+    <div class="callout sage">
+      <div class="label">Why it's triangular</div>
+      <p>That tidy upper-triangular shape isn't a coincidence — it's what lets you <em>separate</em> the camera's lens from its pose. Any well-behaved projection matrix factors uniquely (via <em>RQ decomposition</em>) into an upper-triangular K times an orthogonal rotation. Triangular captures "the lens"; orthogonal captures "where it's pointing." Full detail in the deep-dive below.</p>
+    </div>
+
+    <h2 id="demo">Grab the knobs</h2>
+    <p>A small scene sits in front of the camera — a box on a ground grid. The dark rectangle <em>is</em> the sensor; anything that slides past its edge has fallen off the image. Drag each slider and watch how that one number reshapes the picture. The live K on the right updates as you go.</p>
+
+    <div class="widget">
+      <div class="wtitle">Live re-projection · drag any slider</div>
+      <div class="widget-grid">
+        <div>
+          <canvas id="kcanvas" width="480" height="360"></canvas>
+          <div class="matrix-wrap" style="margin-top:16px;">
+            <div class="matrix" aria-label="current K">
+              <div class="bracket l"></div>
+              <div class="cells">
+                <span id="m_fx" class="hot">350</span><span id="m_s" class="zero">0</span><span id="m_cx" class="hot">240</span>
+                <span class="zero">0</span><span id="m_fy" class="hot">350</span><span id="m_cy" class="hot">180</span>
+                <span class="zero">0</span><span class="zero">0</span><span class="zero">1</span>
+              </div>
+              <div class="bracket r"></div>
+            </div>
+            <div class="mlabel">K — updates live</div>
+          </div>
+        </div>
+        <div class="controls">
+          <div class="control">
+            <label>f<sub>x</sub> <span class="val" id="v_fx">350</span></label>
+            <input type="range" id="s_fx" min="120" max="800" value="350">
+            <div class="desc">Horizontal zoom / field of view.</div>
+          </div>
+          <div class="control">
+            <label>f<sub>y</sub> <span class="val" id="v_fy">350</span></label>
+            <input type="range" id="s_fy" min="120" max="800" value="350">
+            <div class="desc">Vertical zoom. Split it from f<sub>x</sub> and the box stretches.</div>
+          </div>
+          <div class="control">
+            <label>c<sub>x</sub> <span class="val" id="v_cx">240</span></label>
+            <input type="range" id="s_cx" min="0" max="480" value="240">
+            <div class="desc">Slides the whole image left / right.</div>
+          </div>
+          <div class="control">
+            <label>c<sub>y</sub> <span class="val" id="v_cy">180</span></label>
+            <input type="range" id="s_cy" min="0" max="360" value="180">
+            <div class="desc">Slides the whole image up / down.</div>
+          </div>
+          <div class="control">
+            <label>skew s <span class="val" id="v_s">0</span></label>
+            <input type="range" id="s_s" min="-150" max="150" value="0">
+            <div class="desc">Shears the image sideways. Real cameras: 0.</div>
+          </div>
+          <button class="reset-btn" id="kreset">reset</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="callout warm">
+      <div class="label">Read it back as feel</div>
+      <p>Notice what each slider <em>doesn't</em> do. Pushing <em>c<sub>x</sub></em> never changes the <em>shape</em> of the box, only its position — moving the principal point just re-labels which pixel is "the centre." Pushing <em>f<sub>x</sub></em> scales the picture <em>about</em> that centre. Those two behaviours — translate vs. scale-about-a-point — are the entire story of the next page.</p>
+    </div>
+
+    <h2>The deep end</h2>
+
+    <details>
+      <summary>Where do <em>f<sub>x</sub></em> and <em>f<sub>y</sub></em> come from — the millimetres-to-pixels bridge</summary>
+      <p>Your lens has a focal length in millimetres — 24&nbsp;mm, 50&nbsp;mm, whatever's on the barrel. But K's focal length is in <em>pixels</em>. The bridge is the sensor's pixel pitch:</p>
+      <p class="eq">f<span class="small">x</span> = f<span class="small">mm</span> / pixel_width<span class="small">mm</span> = f<span class="small">mm</span> &middot; (image_width<span class="small">px</span> / sensor_width<span class="small">mm</span>)</p>
+      <p>So a 50&nbsp;mm lens on a sensor with 5&nbsp;µm pixels gives <em>f<sub>x</sub></em> = 50&nbsp;/&nbsp;0.005 = 10&nbsp;000 pixels. Two consequences fall out of this:</p>
+      <ul>
+        <li><strong><em>f<sub>x</sub></em> and <em>f<sub>y</sub></em> differ only if pixels are non-square</strong> (<em>pixel_width</em> ≠ <em>pixel_height</em>). On almost all modern sensors pixels are square, so <em>f<sub>x</sub></em> ≈ <em>f<sub>y</sub></em>. The famous exception is anamorphic cinema, which squeezes the image horizontally on purpose. Some textbooks even write a single <em>f</em> and an aspect ratio α with <em>f<sub>y</sub></em> = α·<em>f<sub>x</sub></em>.</li>
+        <li><strong>The same lens has different <em>f<sub>x</sub></em> on different cameras.</strong> Crop the sensor or change the resolution and the pixel count per millimetre changes — which is exactly why the next page's resize rule scales the focal length.</li>
+      </ul>
+      <p><span class="tag">source</span> <span style="font-size:14px;color:var(--muted)">Hartley &amp; Zisserman &sect;6.1; OpenCV calibration docs.</span></p>
+    </details>
+
+    <details>
+      <summary>The skew term, written out (and why it's basically always zero)</summary>
+      <p>Skew models a sensor whose pixel axes aren't at 90°. If the angle between the axes is θ, the Hartley–Zisserman form is</p>
+      <p class="eq">s = f<span class="small">x</span> &middot; cot(θ)</p>
+      <p>For a perfectly rectangular pixel grid, θ&nbsp;=&nbsp;90°, cot(90°)&nbsp;=&nbsp;0, and the term vanishes. It would only be non-zero on, say, a digitised photograph where the scan axes were sheared, or some exotic sensor geometry. In practice, calibration toolboxes default it to 0 and many don't even estimate it. We keep it in the matrix because it completes the algebra — and because a <a href="transformations.html#affine">shear of the image</a> is precisely the operation that switches it on.</p>
+      <p><span class="tag">note</span> <span style="font-size:14px;color:var(--muted)">The cot(θ) form is H&amp;Z's; sign conventions vary between texts.</span></p>
+    </details>
+
+    <details>
+      <summary>Why K is upper-triangular: RQ decomposition</summary>
+      <p>Start from a full <em>3×4</em> projection matrix <em>P = [M | p]</em> recovered from calibration, where the left <em>3×3</em> block <em>M</em> is invertible. We want to split it back into "lens" and "pose." The claim is that <em>M = K·R</em> with <em>K</em> upper-triangular and <em>R</em> orthogonal — and that's exactly what an <strong>RQ decomposition</strong> produces (RQ, not the more familiar QR: we want the triangular factor on the <em>left</em>).</p>
+      <p>The decomposition is unique once you fix signs by demanding a positive diagonal on <em>K</em> (a positive focal length is physically required). The orthogonal <em>R</em> is the camera's rotation; the leftover translation comes from <em>p</em>. The upper-triangular structure isn't imposed by hand — it's the only shape consistent with "an affine read-out of the image plane after a rigid rotation."</p>
+      <p><span class="tag">source</span> <span style="font-size:14px;color:var(--muted)">Hartley &amp; Zisserman &sect;6.2.4; Simek, "Dissecting the Camera Matrix."</span></p>
+    </details>
+
+    <script src="proj.js"></script>
+    <script>
+    (function(){
+      const cv = document.getElementById('kcanvas');
+      const ctx = cv.getContext('2d');
+      const W = cv.width, H = cv.height;
+      const defaults = { fx:350, fy:350, cx:240, cy:180, s:0 };
+      const K = Object.assign({}, defaults);
+      const ids = ['fx','fy','cx','cy','s'];
+
+      function draw(){
+        ctx.clearRect(0,0,W,H);
+        ctx.fillStyle = '#10212b'; ctx.fillRect(0,0,W,H);
+        const proj = p => Scene.project(p, K);
+
+        // ground grid
+        ctx.strokeStyle = 'rgba(125,170,185,0.45)'; ctx.lineWidth = 1;
+        Scene.gridLines().forEach(([a,b]) => {
+          const A = proj(a), B = proj(b);
+          ctx.beginPath(); ctx.moveTo(A.u,A.v); ctx.lineTo(B.u,B.v); ctx.stroke();
+        });
+        // box
+        ctx.strokeStyle = '#e0875f'; ctx.lineWidth = 2.2;
+        Scene.boxEdges().forEach(([a,b]) => {
+          const A = proj(a), B = proj(b);
+          ctx.beginPath(); ctx.moveTo(A.u,A.v); ctx.lineTo(B.u,B.v); ctx.stroke();
+        });
+        // principal point crosshair
+        ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(K.cx-9,K.cy); ctx.lineTo(K.cx+9,K.cy);
+        ctx.moveTo(K.cx,K.cy-9); ctx.lineTo(K.cx,K.cy+9);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,0.85)';
+        ctx.font = '11px JetBrains Mono, monospace';
+        ctx.fillText('(cx,cy)', K.cx+12, K.cy-6);
+      }
+
+      function refresh(){
+        ids.forEach(k => {
+          document.getElementById('v_'+k).textContent = Math.round(K[k]);
+          document.getElementById('m_'+k).textContent = Math.round(K[k]);
+        });
+        draw();
+      }
+      ids.forEach(k => {
+        const sl = document.getElementById('s_'+k);
+        sl.addEventListener('input', () => { K[k] = +sl.value; refresh(); });
+      });
+      document.getElementById('kreset').addEventListener('click', () => {
+        ids.forEach(k => { K[k] = defaults[k]; document.getElementById('s_'+k).value = defaults[k]; });
+        refresh();
+      });
+      refresh();
+    })();
+    </script>
+
+    <footer class="page-foot">
+      <span>Camera Intrinsics, the Linear Model</span>
+      <span><a href="transformations.html">Next: Crop, scale, warp &rarr;</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>

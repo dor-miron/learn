@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Camera intrinsics: from XYZ in the world to a pixel. — Camera Intrinsics, the Linear Model</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>Camera Intrinsics, the Linear Model</a>
+    <div class="links">
+      <a href="index.html" class="active">Overview</a>
+      <a href="matrix.html">The K matrix</a>
+      <a href="transformations.html">Crop, scale, warp</a>
+      <a href="breaking.html">Breaking the model</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wide">
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">A short interactive textbook</div>
+      <h1>Camera intrinsics: from XYZ in the world to a pixel.</h1>
+      <p class="lead">The intrinsic matrix K is the camera's own fingerprint — the part of projection that has nothing to do with where the camera is, only how it turns rays into pixels. We'll nail down exactly what K does, play with every knob, and then watch what happens to it when you crop, resize, warp, or distort the image.</p>
+    </header>
+
+    <!-- BODY -->
+
+    <h2>Your instinct is right — with one asterisk</h2>
+    <p>You asked: <em>does the matrix actually move a point from XYZ in space into pixel space?</em> Yes. That is exactly what it does. The asterisk is <strong>which</strong> XYZ, and the fact that one step of the journey is sneakily <em>not</em> a matrix multiply at all.</p>
+
+    <p>Projection happens in stages, and it helps to name them before we touch a single number:</p>
+
+    <figure>
+      <svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The forward projection pipeline and its inverse, with LiDAR supplying the lost depth">
+        <defs>
+          <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#1f5f7a"/>
+          </marker>
+          <marker id="arrw" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#d97757"/>
+          </marker>
+          <marker id="arrs" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0,0 L10,5 L0,10 Z" fill="#6b8e6f"/>
+          </marker>
+        </defs>
+
+        <!-- ============ TOP TRACK: forward projection ============ -->
+        <rect x="14" y="34" width="148" height="54" rx="6" fill="#ece8dd" stroke="#9a937f"/>
+        <text x="88" y="57" text-anchor="middle" font-family="ui-serif, Georgia" font-size="15" fill="#4a4534">World point</text>
+        <text x="88" y="77" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12.5" fill="#6b6b6b">X<tspan font-size="9" dy="3">w</tspan> = (X,Y,Z)</text>
+
+        <rect x="234" y="34" width="148" height="54" rx="6" fill="#d4e7ec" stroke="#1f5f7a"/>
+        <text x="308" y="57" text-anchor="middle" font-family="ui-serif, Georgia" font-size="15" fill="#163f52">Camera frame</text>
+        <text x="308" y="77" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12.5" fill="#1f5f7a">X<tspan font-size="9" dy="3">c</tspan> = (X,Y,Z)</text>
+
+        <rect x="454" y="34" width="162" height="54" rx="6" fill="#f6dccc" stroke="#d97757"/>
+        <text x="535" y="55" text-anchor="middle" font-family="ui-serif, Georgia" font-size="13.5" fill="#5a2a10">Normalized plane</text>
+        <text x="535" y="76" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#8a3f1e">(X/Z, Y/Z, 1)</text>
+
+        <rect x="706" y="34" width="148" height="54" rx="6" fill="#d4e7ec" stroke="#1f5f7a"/>
+        <text x="780" y="57" text-anchor="middle" font-family="ui-serif, Georgia" font-size="15" fill="#163f52">Pixel</text>
+        <text x="780" y="77" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12.5" fill="#1f5f7a">(u, v)</text>
+
+        <!-- forward arrows + invertibility tags -->
+        <path d="M163,61 L231,61" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="197" y="26" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#3a3a3a">[R | t]</text>
+        <text x="197" y="105" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="10.5" fill="#3f5a40">&#10003; invertible</text>
+
+        <path d="M383,61 L452,61" fill="none" stroke="#d97757" stroke-width="1.6" marker-end="url(#arrw)"/>
+        <text x="418" y="26" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" font-weight="bold" fill="#8a3f1e">&#247; Z</text>
+        <text x="418" y="105" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="10.5" font-weight="bold" fill="#8a3f1e">&#10007; NOT invertible</text>
+        <text x="418" y="119" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="9.5" fill="#8a3f1e">depth Z is lost</text>
+
+        <path d="M617,61 L704,61" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="661" y="26" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12" fill="#3a3a3a">K</text>
+        <text x="661" y="105" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="10.5" fill="#3f5a40">&#10003; invertible (K&#8315;&#185;)</text>
+
+        <!-- divider -->
+        <line x1="20" y1="140" x2="880" y2="140" stroke="#e6e1d4" stroke-width="1"/>
+        <text x="450" y="160" text-anchor="middle" font-family="ui-serif, Georgia" font-style="italic" font-size="13" fill="#3a3a3a">Run it backwards &#8212; LiDAR restores the depth that &#247;Z destroyed</text>
+
+        <!-- ============ BOTTOM TRACK: inverse with LiDAR ============ -->
+        <rect x="18" y="176" width="120" height="46" rx="6" fill="#d4e7ec" stroke="#1f5f7a"/>
+        <text x="78" y="204" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="12.5" fill="#163f52">Pixel (u,v)</text>
+        <text x="78" y="238" text-anchor="middle" font-family="-apple-system, sans-serif" font-size="9.5" fill="#9a937f">the pixel from above</text>
+
+        <rect x="208" y="176" width="176" height="46" rx="6" fill="#f6dccc" stroke="#d97757"/>
+        <text x="296" y="197" text-anchor="middle" font-family="ui-serif, Georgia" font-size="13" fill="#5a2a10">viewing ray</text>
+        <text x="296" y="215" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11.5" fill="#8a3f1e">(X/Z, Y/Z, 1) &#183; t</text>
+
+        <rect x="474" y="176" width="158" height="46" rx="6" fill="#ece8dd" stroke="#9a937f"/>
+        <text x="553" y="197" text-anchor="middle" font-family="ui-serif, Georgia" font-size="13" fill="#4a4534">3D point</text>
+        <text x="553" y="215" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11.5" fill="#6b6b6b">X<tspan font-size="8" dy="3">c</tspan> = (X,Y,Z)</text>
+
+        <path d="M139,199 L207,199" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="173" y="190" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#3a3a3a">K&#8315;&#185;</text>
+
+        <path d="M385,199 L473,199" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="429" y="190" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="11" fill="#3a3a3a">&#215; depth Z</text>
+
+        <!-- LiDAR feeding depth into the multiply -->
+        <rect x="360" y="246" width="150" height="42" rx="6" fill="#d8e3d5" stroke="#6b8e6f"/>
+        <text x="435" y="265" text-anchor="middle" font-family="ui-serif, Georgia" font-size="14" fill="#2e4630">LiDAR</text>
+        <text x="435" y="281" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#3f5a40">measures depth Z (3D)</text>
+        <path d="M433,246 L430,205" fill="none" stroke="#6b8e6f" stroke-width="1.5" marker-end="url(#arrs)"/>
+        <text x="520" y="262" text-anchor="start" font-family="-apple-system, sans-serif" font-size="10.5" fill="#3f5a40">hands back the lost Z</text>
+      </svg>
+      <figcaption>Top track: a 3D point becomes a pixel, and the <em>&#247;Z</em> step is the only one you can't undo &mdash; a pixel is a whole ray, not a point. Bottom track: the inverse. <em>K&#8315;&#185;</em> recovers the ray; <em>LiDAR</em> supplies the depth <em>Z</em> that lands you back on the 3D point. LiDAR's own points reach the camera frame through a rigid, fully invertible <em>[R&nbsp;|&nbsp;t]</em>.</figcaption>
+    </figure>
+
+    <p>Which raises the question you're already asking: <strong>can you run this backwards?</strong> Mostly no, and the diagram's lower track shows precisely why. The two <em>matrix</em> steps are each perfectly invertible &mdash; <em>K&#8315;&#185;</em> exists (K is a full-rank upper-triangular matrix), and a rigid <em>[R&nbsp;|&nbsp;t]</em> undoes itself. The culprit is the <em>&#247;Z</em> wedged between them: it throws depth away. Every point along a ray maps to the <em>same</em> pixel, so a pixel back-projects to a whole <em>ray</em>, not a point. To pin down where on that ray the surface actually is, you need depth from somewhere else &mdash; which is exactly the job <a href="#lidar">LiDAR</a> does.</p>
+
+    <div class="callout">
+      <div class="label">The precise answer</div>
+      <p><strong>K maps a point in the <em>camera's own</em> 3D coordinate frame to pixel coordinates.</strong> Not the world frame — the extrinsics <em>[R&nbsp;|&nbsp;t]</em> handle world&nbsp;→&nbsp;camera first. And K only finishes the job <em>after</em> the perspective divide by depth&nbsp;Z. That divide is the one genuinely non-linear step, and it's the reason a camera is a camera and not a photocopier. K itself is pure linear algebra; the "3D&nbsp;→&nbsp;2D" magic lives in the&nbsp;÷Z.</p>
+    </div>
+
+    <p>There are two equivalent ways to say where K acts, and both are worth holding in your head:</p>
+    <ul>
+      <li><strong>Frame A — K eats a 3D camera-frame point.</strong> Multiply <em>K&nbsp;·&nbsp;(X,&nbsp;Y,&nbsp;Z)</em> to get a <em>homogeneous</em> pixel <em>(ũ,&nbsp;ṽ,&nbsp;w)</em>, then divide by <em>w&nbsp;=&nbsp;Z</em> to land on the real pixel <em>(u,&nbsp;v)</em>.</li>
+      <li><strong>Frame B — K eats a flattened 2D point.</strong> Do the divide first: every point on a ray collapses to <em>(X/Z,&nbsp;Y/Z,&nbsp;1)</em> on the <span class="hl">normalized image plane</span> one unit in front of the lens. K then linearly maps that plane into pixels. This is the cleaner mental model: <em>K is the change of coordinates from "metric units on the unit plane" to "pixels on the sensor."</em></li>
+    </ul>
+    <p>They give the same answer because <em>K·(X,Y,Z)/Z = K·(X/Z, Y/Z, 1)</em> — K commutes with the scalar divide. Frame&nbsp;B is the one to remember, because it makes the next three pages obvious: everything K does is a 2D affine read-out of a flat plane, and <a href="transformations.html">everything you can do to that read-out is another 2D affine</a>.</p>
+
+    <div class="callout sage" id="lidar">
+      <div class="label">Why LiDAR pairs with a camera</div>
+      <p>A camera measures <em>direction</em> but discards <em>range</em>; LiDAR measures range directly. That's why they're so often bolted together — each supplies what the other can't. LiDAR returns 3D points in <em>its own</em> sensor frame, and a one-off <em>LiDAR&#8594;camera</em> calibration gives a rigid <em>[R&nbsp;|&nbsp;t]</em> (a rotation and translation, fully invertible) that drops those points into the camera frame. From there it works <em>both</em> directions: <strong>project</strong> LiDAR points through K into the image to colour or densify the cloud (3D&nbsp;&#8594;&nbsp;pixel, the easy way), or <strong>lift</strong> pixels to 3D by reading each pixel's depth off the aligned LiDAR (pixel&nbsp;&#8594;&nbsp;3D, the inverse a lone camera can't do). The depth the <em>&#247;Z</em> destroyed is exactly the number LiDAR hands back.</p>
+    </div>
+
+    <h2>What's on the other pages</h2>
+    <div class="cards">
+      <a class="card" href="matrix.html">
+        <div class="num">01 &middot; the matrix</div>
+        <h3>Every entry of K</h3>
+        <p>The five meaningful numbers — <em>fx, fy, cx, cy</em>, and skew — what each one physically is, and a live demo where you drag every knob and watch a 3D scene re-project.</p>
+      </a>
+      <a class="card" href="transformations.html">
+        <div class="num">02 &middot; transforms</div>
+        <h3>Crop, scale, warp</h3>
+        <p>The one rule that covers cropping, resizing, flipping and rotating: <em>K&prime; = A·K</em>. Why a crop only nudges the principal point, and why a resize touches every entry.</p>
+      </a>
+      <a class="card" href="breaking.html">
+        <div class="num">03 &middot; the limits</div>
+        <h3>Breaking the model</h3>
+        <p>Lens distortion, fisheye, rolling shutter — operations that <em>no</em> K can represent, and the single litmus test that tells you in advance: do straight lines stay straight?</p>
+      </a>
+    </div>
+
+    <h2>Your questions, mapped</h2>
+    <p>You packed several specific things into one request. Here's where each lands:</p>
+    <ul>
+      <li><strong>"Show me the matrix and let me visualize each value."</strong> &rarr; <a href="matrix.html#demo">The K matrix &sect; live demo</a></li>
+      <li><strong>"Does it move XYZ into pixel space?"</strong> &rarr; right here, above — yes, with the ÷Z asterisk.</li>
+      <li><strong>"How do cropping and rescaling change it?"</strong> &rarr; <a href="transformations.html#crop">Crop, scale, warp &sect; cropping</a> and <a href="transformations.html#scale">&sect; rescaling</a></li>
+      <li><strong>"A classical operation and its effect?"</strong> &rarr; <a href="transformations.html#affine">the general affine</a> — the umbrella over flip, rotate and shear.</li>
+      <li><strong>"Functions that ruin the matrix representation?"</strong> &rarr; <a href="breaking.html">Breaking the model</a> — distortion, fisheye, rolling shutter.</li>
+    </ul>
+
+    <h2>References</h2>
+    <ul>
+      <li>Hartley &amp; Zisserman, <em>Multiple View Geometry in Computer Vision</em> (2nd ed., 2004), ch. 6 — the canonical treatment of K and the finite projective camera.</li>
+      <li>Szeliski, <em>Computer Vision: Algorithms and Applications</em> (2nd ed., 2022), &sect; 2.1 &amp; 11 — image formation and calibration.</li>
+      <li><a href="https://docs.opencv.org/4.x/dc/dbb/tutorial_py_calibration.html">OpenCV camera calibration docs</a> — the conventions most code actually uses.</li>
+    </ul>
+
+    <footer class="page-foot">
+      <span>Camera Intrinsics, the Linear Model</span>
+      <span><a href="matrix.html">Next: The K matrix &rarr;</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>

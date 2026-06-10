@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Crop, rescale, flip, rotate — one rule: K′ = A·K. — Camera Intrinsics, the Linear Model</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>Camera Intrinsics, the Linear Model</a>
+    <div class="links">
+      <a href="index.html">Overview</a>
+      <a href="matrix.html">The K matrix</a>
+      <a href="transformations.html" class="active">Crop, scale, warp</a>
+      <a href="breaking.html">Breaking the model</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">02 · transforms that keep K a matrix</div>
+      <h1>Crop, rescale, flip, rotate — one rule: K′ = A·K.</h1>
+      <p class="lead">Almost every image edit you do in pixel space is an affine transform, and an affine transform on the image just left-multiplies K. Cropping shifts the principal point; resizing scales everything; flips and rotations are the same rule with a different A. Worked formulas and a live before/after.</p>
+    </header>
+
+    <!-- BODY -->
+
+    <h2>One rule rules them all</h2>
+    <p>Here's the punchline before the details, because it's genuinely this simple. Take any image-space edit that's an <strong>affine transform</strong> — a crop, a resize, a flip, a rotation, a shear, or any combination — and write it as a 3×3 matrix <em>A</em> acting on pixel coordinates. Then the camera you now have has intrinsics:</p>
+
+    <div class="matrix-wrap" style="margin:24px 0;">
+      <p class="eq" style="font-size:24px; margin:0;">K&prime; = A &middot; K</p>
+    </div>
+
+    <p>That's it. The transform <em>left-multiplies</em> K. The reason is a one-line chain you can verify in your head: a 3D point lands at pixel <em>p = K·X</em>; the edit moves it to <em>p&prime; = A·p = A·K·X = (A·K)·X</em>. The new "stuff that turns world points into pixels" is the product <em>A·K</em>. Crop, scale, flip, rotate — they're not five rules, they're <em>one</em> rule with five different <em>A</em>'s.</p>
+
+    <div class="callout">
+      <div class="label">The mental model</div>
+      <p>K maps the <a href="index.html">normalized plane</a> onto your sensor. An affine edit is just a <em>second</em> linear read-out stacked on top — re-gridding the sensor. Two linear read-outs in a row compose into one, and that one is <em>A·K</em>. The extrinsics <em>[R&nbsp;|&nbsp;t]</em> never enter; the world hasn't moved, only your sensor's coordinate system.</p>
+    </div>
+
+    <p>Order matters: it's <em>A·K</em>, not <em>K·A</em>. Putting <em>A</em> on the right would mean "transform the normalized plane before the lens sees it," which is a different, usually meaningless, operation. The edit happens <em>after</em> projection, so it goes on the <em>left</em>. Let's specialise it.</p>
+
+    <h2 id="crop">Cropping: only the principal point moves</h2>
+    <p>Cropping away the top-left <em>o<sub>x</sub></em> columns and <em>o<sub>y</sub></em> rows is a pure translation of the pixel grid. Its <em>A</em> is the identity with an offset, and when you multiply it through:</p>
+
+    <div class="two-col" style="align-items:center;">
+      <div class="matrix-wrap">
+        <div class="matrix">
+          <div class="bracket l"></div>
+          <div class="cells">
+            <span>1</span><span class="zero">0</span><span class="hot">&minus;o<sub>x</sub></span>
+            <span class="zero">0</span><span>1</span><span class="hot">&minus;o<sub>y</sub></span>
+            <span class="zero">0</span><span class="zero">0</span><span>1</span>
+          </div>
+          <div class="bracket r"></div>
+        </div>
+        <div class="mlabel">A for a crop</div>
+      </div>
+      <div>
+        <p class="eq" style="text-align:left;">f<span class="small">x</span>&prime; = f<span class="small">x</span><br>
+        f<span class="small">y</span>&prime; = f<span class="small">y</span><br>
+        c<span class="small">x</span>&prime; = c<span class="small">x</span> &minus; o<span class="small">x</span><br>
+        c<span class="small">y</span>&prime; = c<span class="small">y</span> &minus; o<span class="small">y</span></p>
+      </div>
+    </div>
+
+    <p>The focal lengths don't budge — a crop doesn't change how many pixels a metre spans, it just throws pixels away. Only the principal point shifts, and it <em>shifts by exactly the offset you removed</em>. Note the <strong>minus sign</strong>: chop 120 pixels off the left and the optical centre, which used to be at <em>c<sub>x</sub></em> = 240, is now at column 120 in the smaller image. Cropping moves the centre <em>toward</em> the corner you cut from. Centre-cropping is just this with <em>o<sub>x</sub></em>, <em>o<sub>y</sub></em> chosen to trim both sides equally.</p>
+
+    <div class="callout warm">
+      <div class="label">The bug this prevents</div>
+      <p>If you crop an image and feed it to anything that uses K — a pose estimator, an AR overlay, a stereo rig — and you <em>forget</em> to subtract the offset from <em>c<sub>x</sub>, c<sub>y</sub></em>, every reprojection is silently wrong by the crop amount. This is one of the most common calibration bugs in the wild.</p>
+    </div>
+
+    <h2 id="scale">Rescaling: every entry scales</h2>
+    <p>Resize by <em>(s<sub>x</sub>, s<sub>y</sub>)</em> — say 0.5 to halve resolution — and <em>A</em> is a diagonal scaling. Multiply through and <em>everything in the affected row</em> scales, principal point included:</p>
+
+    <div class="two-col" style="align-items:center;">
+      <div class="matrix-wrap">
+        <div class="matrix">
+          <div class="bracket l"></div>
+          <div class="cells">
+            <span class="hot">s<sub>x</sub></span><span class="zero">0</span><span class="zero">0</span>
+            <span class="zero">0</span><span class="hot">s<sub>y</sub></span><span class="zero">0</span>
+            <span class="zero">0</span><span class="zero">0</span><span>1</span>
+          </div>
+          <div class="bracket r"></div>
+        </div>
+        <div class="mlabel">A for a resize</div>
+      </div>
+      <div>
+        <p class="eq" style="text-align:left;">f<span class="small">x</span>&prime; = s<span class="small">x</span>&middot;f<span class="small">x</span><br>
+        f<span class="small">y</span>&prime; = s<span class="small">y</span>&middot;f<span class="small">y</span><br>
+        c<span class="small">x</span>&prime; = s<span class="small">x</span>&middot;c<span class="small">x</span><br>
+        c<span class="small">y</span>&prime; = s<span class="small">y</span>&middot;c<span class="small">y</span></p>
+      </div>
+    </div>
+
+    <p>This is the one people get wrong by halves. The instinct is "I resized, so scale the focal length" — and then they forget the principal point also scales. If your centre was at (240, 180) and you halve the image, it's now at (120, 90), not still (240, 180). A uniform resize (<em>s<sub>x</sub></em> = <em>s<sub>y</sub></em>) keeps the picture looking identical and just relabels the grid; a non-uniform one (<em>s<sub>x</sub></em> ≠ <em>s<sub>y</sub></em>) genuinely stretches it and pulls <em>f<sub>x</sub></em> and <em>f<sub>y</sub></em> apart — the same anamorphic effect that makes pixels non-square.</p>
+
+    <details>
+      <summary>The half-pixel trap (why <em>c<sub>x</sub>&prime; = s<sub>x</sub>·c<sub>x</sub></em> is slightly wrong)</summary>
+      <p>The clean rule <em>c<sub>x</sub>&prime; = s<sub>x</sub>·c<sub>x</sub></em> assumes integer pixel coordinates sit at pixel <em>corners</em>. But most libraries (OpenCV, and PyTorch/TensorFlow with the half-pixel convention) treat integer coordinates as pixel <em>centres</em> — pixel 0 covers the span [−0.5, +0.5]. Under that convention the geometrically exact map is:</p>
+      <p class="eq">c<span class="small">x</span>&prime; = s<span class="small">x</span> &middot; (c<span class="small">x</span> + 0.5) &minus; 0.5</p>
+      <p>The <em>+0.5 … −0.5</em> dance converts centre-referenced to corner-referenced and back. For large images the difference is sub-pixel and often ignored; for repeated down/up-sampling, or any precise geometric task, skipping it injects a creeping half-pixel shift that ruins calibration. Sources genuinely disagree on the default convention — <em>which is exactly why you should pin yours down</em> rather than trust a formula you read once.</p>
+      <p><span class="tag">source</span> <span style="font-size:14px;color:var(--muted)">Richeimer, "Resize Confusion"; OpenCV resize semantics.</span></p>
+    </details>
+
+    <h2 id="affine">The classical move: a general affine</h2>
+    <p>Crop and scale are the gentle special cases. The "classical operation" worth internalising is the <em>general 2D affine</em> — the umbrella that contains flip, rotation-in-the-image-plane, and shear. Its <em>A</em> is a full 2×3:</p>
+
+    <div class="matrix-wrap" style="margin:22px 0;">
+      <div class="matrix" style="font-size:15px;">
+        <div class="bracket l"></div>
+        <div class="cells">
+          <span class="hot">a</span><span class="hot">b</span><span class="hot">t<sub>x</sub></span>
+          <span class="hot">c</span><span class="hot">d</span><span class="hot">t<sub>y</sub></span>
+          <span class="zero">0</span><span class="zero">0</span><span>1</span>
+        </div>
+        <div class="bracket r"></div>
+      </div>
+      <div class="mlabel">A for any affine — flip, rotate, shear all live here</div>
+    </div>
+
+    <p>The same <em>K&prime; = A·K</em> applies. Three instances worth knowing by feel:</p>
+    <ul>
+      <li><strong>Horizontal flip</strong> of a <em>W</em>-wide image: <em>A</em> = [[−1, 0, <em>W</em>], [0, 1, 0]]. The <em>−1</em> mirrors <em>x</em>; the <em>+W</em> shoves the mirrored image back into positive coordinates. (Use <em>W−1</em> if your origin is the centre of pixel 0 rather than its corner — the perennial off-by-one.)</li>
+      <li><strong>Shear</strong>: <em>A</em> = [[1, <em>k</em>, 0], [0, 1, 0]]. This one is special — it writes a value straight into K's <em>skew</em> slot. The skew term you'll "never see in a real camera" is exactly what a sheared image looks like.</li>
+      <li><strong>Rotation in the image plane</strong>: <em>A</em> = [[cos, −sin, …], [sin, cos, …]]. Here's the catch — see the callout.</li>
+    </ul>
+
+    <div class="callout sage">
+      <div class="label">Rotation breaks the tidy shape</div>
+      <p>An in-plane rotation is a perfectly legal affine, so <em>K&prime; = A·K</em> still holds — but the product is <strong>no longer upper-triangular</strong>: the lower-left entry goes non-zero. It's still a valid linear camera, just not in canonical form. To recover clean <em>f<sub>x</sub>, f<sub>y</sub>, c<sub>x</sub>, c<sub>y</sub></em> you'd <em>RQ-decompose</em> <em>A·K</em> and absorb the rotation into the extrinsics — which makes sense: rotating the photo is indistinguishable from having rolled the camera. Watch the <span style="color:var(--warm)">highlighted entry</span> light up in the demo.</p>
+    </div>
+
+    <div class="widget">
+      <div class="wtitle">Pick a transform · watch K&prime; = A·K</div>
+      <div class="btn-row" id="tbtns">
+        <button class="btn active" data-t="id">Original</button>
+        <button class="btn" data-t="crop">Crop TL</button>
+        <button class="btn" data-t="half">Resize ½</button>
+        <button class="btn" data-t="flip">Flip H</button>
+        <button class="btn" data-t="rot">Rotate 15°</button>
+        <button class="btn" data-t="shear">Shear</button>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin:4px 0 14px;">Faint = original image · solid = after the transform · dashed = the new image frame.</p>
+      <div class="widget-grid">
+        <div><canvas id="tcanvas" width="480" height="360"></canvas></div>
+        <div style="display:flex;flex-direction:column;gap:18px;">
+          <div class="matrix-wrap">
+            <div class="matrix" style="font-size:13px;">
+              <div class="bracket l"></div>
+              <div class="cells" id="Acells">
+                <span>1</span><span class="zero">0</span><span>0</span>
+                <span class="zero">0</span><span>1</span><span>0</span>
+                <span class="zero">0</span><span class="zero">0</span><span>1</span>
+              </div>
+              <div class="bracket r"></div>
+            </div>
+            <div class="mlabel">A — the edit</div>
+          </div>
+          <div class="matrix-wrap">
+            <div class="matrix" style="font-size:13px;">
+              <div class="bracket l"></div>
+              <div class="cells" id="Kpcells">
+                <span class="hot">300</span><span class="zero">0</span><span class="hot">240</span>
+                <span class="zero">0</span><span class="hot">300</span><span class="hot">180</span>
+                <span class="zero">0</span><span class="zero">0</span><span>1</span>
+              </div>
+              <div class="bracket r"></div>
+            </div>
+            <div class="mlabel">K&prime; = A&middot;K</div>
+          </div>
+          <p id="tnote" style="font-size:12.5px;color:var(--muted);margin:0;line-height:1.45;">The identity: K&prime; = K, nothing changes.</p>
+        </div>
+      </div>
+    </div>
+
+    <h2>So what's the boundary?</h2>
+    <p>Every operation on this page shares one property: it sends <em>straight lines to straight lines</em>. That's the secret signature of "can be folded into K." Crop, scale, flip, rotate, shear — all of them preserve straightness, so all of them are just another matrix you can multiply in. The moment an operation <em>bends</em> a straight line, no <em>A</em> exists, and <em>K&prime; = A·K</em> has nothing to say. That's the <a href="breaking.html">next page</a>.</p>
+
+    <script src="proj.js"></script>
+    <script>
+    (function(){
+      const cv = document.getElementById('tcanvas');
+      const ctx = cv.getContext('2d');
+      const W = cv.width, H = cv.height;
+      const K0 = { fx:300, fy:300, cx:240, cy:180, s:0 };
+      const cx0 = K0.cx, cy0 = K0.cy;
+
+      // affine builders: each returns [a,b,tx, c,d,ty]
+      const th = 15 * Math.PI/180, C = Math.cos(th), S = Math.sin(th);
+      const transforms = {
+        id:    { A:[1,0,0, 0,1,0], note:"The identity: K′ = K, nothing changes.", frame:[0,0,W,H] },
+        crop:  { A:[1,0,-120, 0,1,-90], note:"Crop 120×90 off the top-left. f unchanged; the principal point slides to (120, 90).", frame:[0,0,W-120,H-90] },
+        half:  { A:[0.5,0,0, 0,0.5,0], note:"Halve the resolution. Every entry halves — focal length AND principal point.", frame:[0,0,W*0.5,H*0.5] },
+        flip:  { A:[-1,0,W, 0,1,0], note:"Mirror left–right. cₓ becomes W − cₓ = 240; fₓ flips sign.", frame:[0,0,W,H] },
+        rot:   { A:[C,-S, cx0-(C*cx0-S*cy0), S,C, cy0-(S*cx0+C*cy0)], note:"Rotate 15° about the centre. K′ is no longer triangular — the lower-left entry is now non-zero.", frame:[0,0,W,H] },
+        shear: { A:[1,0.3,-0.3*cy0, 0,1,0], note:"Shear in x. A value lands straight in K′'s skew slot — this is what non-zero skew means.", frame:[0,0,W,H] },
+      };
+
+      function apply(A, p){ return { u: A[0]*p.u + A[1]*p.v + A[2], v: A[3]*p.u + A[4]*p.v + A[5] }; }
+
+      function drawScene(A, style){
+        const proj = pt => apply(A, Scene.project(pt, K0));
+        ctx.strokeStyle = style.grid; ctx.lineWidth = style.gw;
+        Scene.gridLines().forEach(([a,b]) => {
+          const P = proj(a), Q = proj(b);
+          ctx.beginPath(); ctx.moveTo(P.u,P.v); ctx.lineTo(Q.u,Q.v); ctx.stroke();
+        });
+        ctx.strokeStyle = style.box; ctx.lineWidth = style.bw;
+        Scene.boxEdges().forEach(([a,b]) => {
+          const P = proj(a), Q = proj(b);
+          ctx.beginPath(); ctx.moveTo(P.u,P.v); ctx.lineTo(Q.u,Q.v); ctx.stroke();
+        });
+      }
+
+      function fmt(x){ const r = Math.round(x*100)/100; return Number.isInteger(r)? r : r.toFixed(2); }
+
+      function setMatrix(el, vals, hotIdx){
+        const sp = el.querySelectorAll('span');
+        vals.forEach((v,i) => {
+          sp[i].textContent = (typeof v === 'string') ? v : fmt(v);
+          sp[i].className = (v === 0 || v === '0') ? 'zero' : (hotIdx.includes(i) ? 'hot' : '');
+        });
+      }
+
+      function render(key){
+        const t = transforms[key];
+        ctx.clearRect(0,0,W,H); ctx.fillStyle = '#10212b'; ctx.fillRect(0,0,W,H);
+        // ghost original
+        drawScene([1,0,0,0,1,0], { grid:'rgba(125,170,185,0.16)', gw:1, box:'rgba(224,135,95,0.28)', bw:1.4 });
+        // transformed
+        drawScene(t.A, { grid:'rgba(125,170,185,0.5)', gw:1, box:'#e0875f', bw:2.4 });
+        // new image frame (dashed)
+        ctx.setLineDash([6,5]); ctx.strokeStyle = 'rgba(255,255,255,0.65)'; ctx.lineWidth = 1.2;
+        const f = t.frame; ctx.strokeRect(f[0]+0.5, f[1]+0.5, f[2]-1, f[3]-1);
+        ctx.setLineDash([]);
+        // matrices
+        const A = t.A;
+        setMatrix(document.getElementById('Acells'),
+          [A[0],A[1],A[2], A[3],A[4],A[5], 0,0,1], [0,1,2,3,4,5]);
+        // K' = A*K0  (K0 has s=0)
+        const fx=K0.fx, fy=K0.fy, cx=K0.cx, cy=K0.cy;
+        const Kp = [ A[0]*fx, A[1]*fy, A[0]*cx + A[1]*cy + A[2],
+                     A[3]*fx, A[4]*fy, A[3]*cx + A[4]*cy + A[5],
+                     0, 0, 1 ];
+        // highlight the normally-zero lower-left entry (index 3) when it wakes up
+        const hot = [0,1,2,4,5]; if (Math.abs(Kp[3]) > 1e-6) hot.push(3);
+        setMatrix(document.getElementById('Kpcells'), Kp, hot);
+        document.getElementById('tnote').textContent = t.note;
+      }
+
+      const btns = document.querySelectorAll('#tbtns .btn');
+      btns.forEach(b => b.addEventListener('click', () => {
+        btns.forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        render(b.dataset.t);
+      }));
+      render('id');
+    })();
+    </script>
+
+    <footer class="page-foot">
+      <span>Camera Intrinsics, the Linear Model</span>
+      <span><a href="breaking.html">Next: Breaking the model &rarr;</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>

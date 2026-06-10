@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Track anything with a click — Click-to-Track: Correlation Filters</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>Click-to-Track: Correlation Filters</a>
+    <div class="links">
+      <a href="index.html" class="active">How it works</a>
+      <a href="limits.html">Limits & frontier</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">A short interactive field guide</div>
+      <h1>Track anything with a click</h1>
+      <p class="lead">You draw one box on frame 1 — no detector, no labels, no class. A discriminative correlation filter (KCF, CSRT) learns that patch and re-finds it every frame, at hundreds of frames per second. Here's the trick that makes it work, and why it's faster than it has any right to be.</p>
+    </header>
+
+    <h2>One box, then follow it</h2>
+
+    <p>Here is the whole problem. A video is playing. You draw a single rectangle around something on the first frame &mdash; a person, a ball, a drone, a coffee mug &mdash; and the computer follows <em>that thing</em> for the rest of the clip. No object detector. No class label. No training set of mug photos. Just <em>this</em> region, <em>now</em>, follow it.</p>
+
+    <p>This is called <strong>single-object</strong> or <strong>model-free</strong> tracking, and the &ldquo;model-free&rdquo; part is the whole personality. A detector-based tracker like <a href="../bytetrack-guide/index.html">ByteTrack</a> runs a trained network on every frame to find all the people (or cars, or whatever it was trained on) and then stitches those boxes into trajectories. It knows what a person looks like <em>in general</em>. A correlation-filter tracker knows nothing in general. Everything it will ever know about the target is whatever was inside the box you drew, refined frame by frame.</p>
+
+    <div class="callout">
+      <div class="label">The key tension</div>
+      <p>Because it learns the target on the fly, a correlation filter tracks <em>anything</em> you can put a box around &mdash; no retraining, no classes. That same fact is the curse: it can be fooled by look-alikes, and it can quietly forget what the target was. Power and brittleness come from the same root.</p>
+    </div>
+
+    <p>The click itself is mundane &mdash; in OpenCV it&rsquo;s <code>cv2.selectROI</code>, which lets you drag a box and hands you <code>(x, y, w, h)</code>. The interesting question is what happens next: given one labeled patch, how do you re-find it in the next frame, and the next, fast enough to keep up with video? The answer the <abbr title="Kernelized Correlation Filter">KCF</abbr> and <abbr title="Channel and Spatial Reliability Tracker">CSRT</abbr> trackers give is a genuinely clever piece of signal processing.</p>
+
+    <h2>A correlation filter is a template that <em>peaks</em></h2>
+
+    <p>Start with the obvious idea: <strong>template matching</strong>. Keep the patch from frame 1 as a little template. In the next frame, slide it over every location, measure how well it matches, and declare the best-matching spot the new position. &ldquo;Slide a template and measure match at every offset&rdquo; is exactly <em>cross-correlation</em> &mdash; a sliding dot product.</p>
+
+    <p>Done naively this is mediocre. The raw patch correlates highly with anything of similar brightness or texture, so the response is a mushy blob, not a confident spike, and it drifts onto whatever is bright nearby. We want something sharper.</p>
+
+    <p>Here is the move that gives the method its name. Instead of using the raw patch as the template, we <strong>learn a filter</strong> &mdash; call it <em>h</em> &mdash; with one demand: when <em>h</em> is correlated with the training patch, the output should be a clean <strong>2D Gaussian bump centred on the target</strong> and approximately zero everywhere else. We&rsquo;re not storing an appearance; we&rsquo;re solving for the filter that <em>produces a peak</em>. That&rsquo;s a regression problem (least-squares with a ridge penalty), and its solution is the correlation filter.</p>
+
+    <figure>
+      <svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A search window is correlated with the learned filter, producing a response map with a single sharp peak whose location is the new target position">
+        <defs>
+          <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0,0 L9,5 L0,10 z" fill="#1f5f7a"/>
+          </marker>
+        </defs>
+        <!-- search window -->
+        <rect x="24" y="48" width="150" height="150" rx="4" fill="#eef4f6" stroke="#1f5f7a" stroke-width="1.5"/>
+        <text x="99" y="40" text-anchor="middle" font-family="monospace" font-size="12" fill="#6b6b6b">search window</text>
+        <circle cx="120" cy="120" r="15" fill="#d97757" opacity="0.85"/>
+        <text x="120" y="124" text-anchor="middle" font-family="monospace" font-size="10" fill="#fff">target</text>
+        <!-- correlate operator -->
+        <text x="210" y="128" text-anchor="middle" font-family="serif" font-size="30" fill="#1a1a1a">&#8859;</text>
+        <text x="210" y="150" text-anchor="middle" font-family="monospace" font-size="11" fill="#6b6b6b">filter h</text>
+        <path d="M236,123 L286,123" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr)"/>
+        <!-- response map -->
+        <rect x="300" y="48" width="150" height="150" rx="4" fill="#fbfaf7" stroke="#6b8e6f" stroke-width="1.5"/>
+        <text x="375" y="40" text-anchor="middle" font-family="monospace" font-size="12" fill="#6b6b6b">response map</text>
+        <ellipse cx="392" cy="120" rx="52" ry="52" fill="#6b8e6f" opacity="0.10"/>
+        <ellipse cx="392" cy="120" rx="34" ry="34" fill="#6b8e6f" opacity="0.16"/>
+        <ellipse cx="392" cy="120" rx="18" ry="18" fill="#6b8e6f" opacity="0.30"/>
+        <circle cx="392" cy="120" r="5" fill="#163f52"/>
+        <line x1="392" y1="120" x2="392" y2="198" stroke="#163f52" stroke-width="1" stroke-dasharray="3 3"/>
+        <line x1="392" y1="120" x2="300" y2="120" stroke="#163f52" stroke-width="1" stroke-dasharray="3 3"/>
+        <!-- arrow to verdict -->
+        <path d="M462,123 L512,123" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr)"/>
+        <text x="612" y="110" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="600" fill="#163f52">argmax</text>
+        <text x="612" y="132" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#3a3a3a">= new position</text>
+        <text x="612" y="154" text-anchor="middle" font-family="monospace" font-size="11" fill="#6b6b6b">peak height</text>
+        <text x="612" y="170" text-anchor="middle" font-family="monospace" font-size="11" fill="#6b6b6b">= confidence</text>
+      </svg>
+      <figcaption>Each frame, the search window is correlated with the learned filter <em>h</em>. A well-trained filter answers with a single sharp peak; its location is the target&rsquo;s new position, and its height is a usable confidence score.</figcaption>
+    </figure>
+
+    <p>Two things fall out of this picture for free. The peak&rsquo;s <em>location</em> tells you where the target moved. The peak&rsquo;s <em>height</em> tells you how confident the match is &mdash; a peak that collapses into a low, ambiguous bump is the tracker&rsquo;s way of saying &ldquo;I&rsquo;ve lost it.&rdquo; We&rsquo;ll lean on both later.</p>
+
+    <h2>Why it runs at hundreds of frames per second</h2>
+
+    <p>So far this could be slow. To make the filter <em>discriminative</em> &mdash; sharp, not mushy &mdash; you want to train it against lots of negative examples: the target dead-centre is the one positive, and every <em>off-centre</em> version (where background has crept into the window) should produce a low response. Where do those negatives come from? You shift the patch. Each cyclic shift of the window is a different alignment, and all but the centred one are negatives.</p>
+
+    <p>Train ridge regression honestly over all <em>n</em> shifts of an <em>n</em>-pixel patch and you have an <em>n</em>&times;<em>n</em> linear system &mdash; an <em>O(n</em><span class="top">3</span><em>)</em> matrix inversion. For a modest 150&times;150 window that is millions-cubed. Hopeless at video rate. This is where the method earns its keep:</p>
+
+    <div class="callout">
+      <div class="label">The one idea to remember</div>
+      <p>The set of all cyclic shifts of a patch forms a <strong>circulant matrix</strong>, and <em>every</em> circulant matrix is diagonalised by the Discrete Fourier Transform. So in the Fourier domain the giant coupled system falls apart into <em>n</em> independent one-variable equations. Training stops being a matrix inversion and becomes an <strong>element-wise divide of two FFTs</strong>.</p>
+    </div>
+
+    <p>Written out, the linear correlation filter has this closed form (uppercase = the 2D DFT of the lowercase signal, <span class="top">&lowast;</span> = complex conjugate, &#8857; = element-wise product, and the division is element-wise):</p>
+
+    <p class="eq">W = ( X<span class="top">&lowast;</span> &#8857; Y ) / ( X<span class="top">&lowast;</span> &#8857; X + &lambda; )</p>
+
+    <p>That&rsquo;s the entire training step: take the FFT of the patch <em>X</em> and of the Gaussian target <em>Y</em>, multiply and divide element-wise, done. Detection is the same shape &mdash; one FFT, one element-wise multiply by the filter, one inverse FFT to get the response map. Everything is dominated by the FFT, so the cost drops from <em>O(n</em><span class="top">3</span><em>)</em> to <strong><em>O(n</em> log <em>n)</em></strong>. That single change is why MOSSE hit 600+ fps in 2010 and KCF runs comfortably past 100 fps on a CPU today.</p>
+
+    <div class="callout sage">
+      <div class="label">Where this came from</div>
+      <p>The trick was introduced for tracking by <strong>MOSSE</strong> (Bolme, Beveridge, Draper &amp; Lui, CVPR 2010) &mdash; &ldquo;Minimum Output Sum of Squared Error&rdquo; &mdash; a single-channel grayscale filter clocked at <strong>669 fps</strong>. CSK (2012) added a kernel; <strong>KCF</strong> (Henriques, Caseiro, Martins &amp; Batista, TPAMI 2015) added HOG features and the kernel trick. Same Fourier skeleton throughout.</p>
+    </div>
+
+    <details>
+      <summary>The derivation: circulant structure, diagonalisation, and the kernel trick (KCF)</summary>
+      <p><strong>Ridge regression.</strong> Given samples <em>x<span class="small">i</span></em> with targets <em>y<span class="small">i</span></em>, ridge regression seeks <em>w</em> minimising &Sigma;<span class="small">i</span>(<em>w</em><span class="top">&#8868;</span><em>x<span class="small">i</span></em> &minus; <em>y<span class="small">i</span></em>)<span class="top">2</span> + &lambda;&#8214;<em>w</em>&#8214;<span class="top">2</span>, with the familiar closed form <em>w</em> = (<em>X</em><span class="top">&#8868;</span><em>X</em> + &lambda;<em>I</em>)<span class="top">&minus;1</span><em>X</em><span class="top">&#8868;</span><em>y</em>. Here the rows of <em>X</em> are not independent data &mdash; they are all the cyclic shifts of one base patch.</p>
+      <p><strong>Circulant = diagonal in Fourier.</strong> A matrix whose every row is a cyclic shift of the row above is <em>circulant</em>. The key algebraic fact (KCF, &sect;4): a circulant matrix is diagonalised by the DFT matrix <em>F</em> regardless of the generating patch, i.e. <em>X</em> = <em>F</em> diag(<em>x&#770;</em>) <em>F</em><span class="top">H</span>. Substitute that into the ridge solution and every matrix in sight becomes diagonal; the coupled system decouples frequency-by-frequency, leaving the element-wise expression <em>W</em> = (<em>X</em><span class="top">&lowast;</span> &#8857; <em>Y</em>) / (<em>X</em><span class="top">&lowast;</span> &#8857; <em>X</em> + &lambda;). The denominator <em>X</em><span class="top">&lowast;</span>&#8857;<em>X</em> is just the power spectrum |<em>X</em>|<span class="top">2</span>.</p>
+      <p><strong>The kernel trick (this is KCF).</strong> KCF runs the same idea in a kernelised ridge regression so it can use a Gaussian or polynomial kernel on multi-channel <strong>HOG</strong> features. Remarkably, the circulant structure survives kernelisation, and the dual coefficients have the equally cheap form &alpha;&#770; = <em>Y</em> / (<em>K</em><span class="top">xx</span> + &lambda;), where <em>K</em><span class="top">xx</span> is the Fourier transform of the kernel auto-correlation of the patch. Still one FFT and an element-wise divide.</p>
+      <p><strong>The convention that bites people.</strong> Because FFT-based correlation puts the zero-shift output at index (0,&nbsp;0), the Gaussian regression target is centred on the <em>top-left corner</em> and wraps around the edges &mdash; not placed in the visual middle. Centre it naively and your peak is off by half a window. The cosine window (below) is applied for a related reason: to suppress the discontinuity where the patch wraps.</p>
+    </details>
+
+    <h2>The per-frame loop</h2>
+
+    <p>Putting it together, here is the actual loop a KCF/CSRT tracker runs. It is strikingly short.</p>
+
+    <figure>
+      <svg viewBox="0 0 720 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="The tracking loop: crop a search window at the last position, correlate via FFT to get a response map, take the peak as the new position, retrain the filter there and blend it into the running model, then repeat on the next frame">
+        <defs>
+          <marker id="arr2" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0,0 L9,5 L0,10 z" fill="#1f5f7a"/>
+          </marker>
+          <marker id="arr2w" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0,0 L9,5 L0,10 z" fill="#d97757"/>
+          </marker>
+        </defs>
+        <rect x="14" y="40" width="150" height="58" rx="6" fill="#eef4f6" stroke="#1f5f7a" stroke-width="1.3"/>
+        <text x="89" y="64" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#163f52">crop search window</text>
+        <text x="89" y="82" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#163f52">at last position</text>
+
+        <path d="M168,69 L196,69" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+        <rect x="200" y="40" width="150" height="58" rx="6" fill="#eef4f6" stroke="#1f5f7a" stroke-width="1.3"/>
+        <text x="275" y="58" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#163f52">FFT &middot; filter &rarr; IFFT</text>
+        <text x="275" y="76" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#6b6b6b">= response map</text>
+
+        <path d="M354,69 L382,69" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+        <rect x="386" y="40" width="150" height="58" rx="6" fill="#fbf2ee" stroke="#d97757" stroke-width="1.3"/>
+        <text x="461" y="58" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#8a3f1e">peak = new position</text>
+        <text x="461" y="76" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#6b6b6b">(+ scale, if any)</text>
+
+        <path d="M540,69 L568,69" fill="none" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+        <rect x="556" y="40" width="150" height="58" rx="6" fill="#eef4f6" stroke="#1f5f7a" stroke-width="1.3"/>
+        <text x="631" y="58" text-anchor="middle" font-family="sans-serif" font-size="13" fill="#163f52">retrain + blend</text>
+        <text x="631" y="76" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#6b6b6b">into model (rate &eta;)</text>
+
+        <!-- return arrow -->
+        <path d="M631,100 L631,140 L89,140 L89,102" fill="none" stroke="#d97757" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#arr2w)"/>
+        <text x="360" y="160" text-anchor="middle" font-family="monospace" font-size="12" fill="#8a3f1e">next frame</text>
+      </svg>
+      <figcaption>The loop. Frame 1 only does the right-hand box (build the filter); every frame after runs the full cycle. The dashed return is where the online update lives &mdash; and, as the next page shows, where most failures are born.</figcaption>
+    </figure>
+
+    <p>Two details in that loop matter more than they look. <strong>The cosine (Hann) window</strong> multiplies every patch before the FFT, fading its edges to zero so the circular-correlation assumption doesn&rsquo;t see a hard discontinuity at the boundary. And <strong>the online update</strong> &mdash; the dashed arrow &mdash; never retrains from scratch: it linearly blends the new filter into the running one with a small learning rate <em>&eta;</em> (around 0.02 for HOG features), so the model adapts to gradual appearance change while smoothing over single-frame noise.</p>
+
+    <details>
+      <summary>The loop in pseudocode, and the same thing in OpenCV</summary>
+      <pre><code># --- init (frame 1) ---
+patch = crop(frame1, bbox) * cosine_window
+X = fft2(features(patch))
+Y = fft2(gaussian_peak(bbox.shape))   # 2D Gaussian target
+W = (conj(X) * Y) / (conj(X) * X + lam)
+model_X, model_W = X, W
+
+# --- per frame ---
+for frame in video:
+    z = fft2(features(crop(frame, last_bbox) * cosine_window))
+    response = real(ifft2(model_W * z))      # correlation in Fourier domain
+    peak = argmax(response)                  # -> new center (and scale, in CSRT)
+    last_bbox = bbox_at(peak)
+    # online update: blend, don't replace
+    Xn = fft2(features(crop(frame, last_bbox) * cosine_window))
+    Wn = (conj(Xn) * Y) / (conj(Xn) * Xn + lam)
+    model_X = (1 - eta) * model_X + eta * Xn
+    model_W = (1 - eta) * model_W + eta * Wn</code></pre>
+      <p>In practice you never write this yourself &mdash; OpenCV ships it. Note KCF and CSRT live in the <em>main</em> <code>cv2</code> namespace but require the <code>opencv-contrib-python</code> package (not the base <code>opencv-python</code>):</p>
+      <pre><code>import cv2
+cap = cv2.VideoCapture("clip.mp4")
+ok, frame = cap.read()
+
+bbox = cv2.selectROI("pick target", frame)   # drag a box -> (x, y, w, h)
+tracker = cv2.TrackerCSRT_create()            # or cv2.TrackerKCF_create()
+tracker.init(frame, bbox)
+
+while True:
+    ok, frame = cap.read()
+    if not ok: break
+    found, bbox = tracker.update(frame)       # -> (bool, (x, y, w, h))
+    if found:
+        x, y, w, h = map(int, bbox)
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    cv2.imshow("track", frame)
+    if cv2.waitKey(1) == 27: break</code></pre>
+      <p>(MOSSE is the exception &mdash; it only exists as <code>cv2.legacy.TrackerMOSSE_create()</code>.)</p>
+    </details>
+
+    <h2>The two you&rsquo;ll actually use: KCF and CSRT</h2>
+
+    <p>OpenCV ships a handful of these, but two dominate real use, and they sit at opposite ends of the speed&ndash;accuracy trade.</p>
+
+    <div class="two-col">
+      <div>
+        <h3>KCF &mdash; the fast one</h3>
+        <p>Kernelised ridge regression on HOG features (Henriques et&nbsp;al., 2015). Blazing &mdash; well over 100&nbsp;fps on a CPU. <strong>Fixed scale</strong>: the box never grows or shrinks, and it assumes a rigid rectangle. The right default when the target is roughly constant size and you need speed or many simultaneous trackers.</p>
+      </div>
+      <div>
+        <h3>CSRT &mdash; the accurate one</h3>
+        <p>CSR-DCF (Luke&#382;i&#269; et&nbsp;al., 2017) adds a <strong>spatial reliability map</strong> &mdash; a per-frame mask confining the filter to the actual object &mdash; plus per-channel reliability weights, on HOG&nbsp;+&nbsp;Colornames features. <strong>Estimates scale.</strong> Roughly 10&times; slower (~13&nbsp;fps in the paper) but markedly more robust, especially on non-rectangular targets.</p>
+      </div>
+    </div>
+
+    <p>That spatial reliability map is the single most important difference, and it turns out to be exactly the feature that decides whether either tracker survives a busy or changing background &mdash; which is the next page&rsquo;s job. Both questions you came in with &mdash; <em>does this work over a changing background?</em> and <em>what about a drone that changes its cross-section?</em> &mdash; are really questions about where this elegant little loop breaks.</p>
+
+    <div class="cards">
+      <a class="card" href="limits.html#changing-backgrounds">
+        <div class="num">next &middot; the direct question</div>
+        <h3>Does it survive a changing background?</h3>
+        <p>Short answer: mostly yes &mdash; but for a reason most people have backwards. It&rsquo;s not background subtraction. The real risks are look-alikes and background trapped inside your box.</p>
+      </a>
+      <a class="card" href="limits.html#drone">
+        <div class="num">next &middot; worked verdict</div>
+        <h3>Tracking a maneuvering drone</h3>
+        <p>Scale change, a shifting cross-section, fast motion, sky vs. clutter &mdash; a drone hits every failure mode at once. An honest assessment of how far KCF/CSRT get you, and what to add.</p>
+      </a>
+    </div>
+
+    <h2>References</h2>
+    <ul>
+      <li>Bolme, Beveridge, Draper, Lui. &ldquo;Visual Object Tracking using Adaptive Correlation Filters&rdquo; (MOSSE). CVPR 2010.</li>
+      <li>Henriques, Caseiro, Martins, Batista. &ldquo;Exploiting the Circulant Structure of Tracking-by-detection with Kernels&rdquo; (CSK). ECCV 2012.</li>
+      <li>Henriques, Caseiro, Martins, Batista. &ldquo;High-Speed Tracking with Kernelized Correlation Filters&rdquo; (KCF). IEEE TPAMI 37(3), 2015.</li>
+      <li>Luke&#382;i&#269;, Voj&iacute;&#345;, &#268;ehovin Zajc, Matas, Kristan. &ldquo;Discriminative Correlation Filter with Channel and Spatial Reliability&rdquo; (CSR-DCF / CSRT). CVPR 2017; extended in IJCV 2018.</li>
+      <li>OpenCV Tracking API &mdash; <code>cv2.TrackerKCF_create</code>, <code>cv2.TrackerCSRT_create</code> (requires <code>opencv-contrib-python</code>).</li>
+    </ul>
+
+    <footer class="page-foot">
+      <span>Click-to-Track: Correlation Filters</span>
+      <span><a href="limits.html">Next: Limits & frontier &rarr;</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>

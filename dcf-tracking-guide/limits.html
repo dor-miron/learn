@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Where it fails, changing backgrounds, and the drone problem — Click-to-Track: Correlation Filters</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>Click-to-Track: Correlation Filters</a>
+    <div class="links">
+      <a href="index.html">How it works</a>
+      <a href="limits.html" class="active">Limits & frontier</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">02 · where it breaks</div>
+      <h1>Where it fails, changing backgrounds, and the drone problem</h1>
+      <p class="lead">The same things that make correlation filters fast make them brittle. A taxonomy of how they lose the target, a straight answer on whether they survive a changing background, a worked verdict on tracking a maneuvering drone, and the trackers that fixed each weakness.</p>
+    </header>
+
+    <h2 id="failures">How a correlation filter loses the target</h2>
+
+    <p>Everything good about a correlation filter &mdash; it learns online, it searches locally, it updates every frame &mdash; is also exactly how it fails. The failures are not random; they&rsquo;re the direct shadow of the design choices on the <a href="index.html">previous page</a>. Six recurring ones:</p>
+
+    <ul>
+      <li><strong>Fast motion &rarr; out of the window.</strong> The tracker only correlates over a <em>local</em> search region around the last position. If the target (or the camera) jumps farther than that region between frames, the peak simply isn&rsquo;t in the window and the target is gone. A bigger window costs speed and invites distractors.</li>
+      <li><strong>Scale, and worse, aspect.</strong> Base KCF estimates translation only &mdash; the box never resizes. CSRT and DSST add a single <em>isotropic</em> scale factor. None of the classic filters estimate <strong>aspect-ratio change or out-of-plane rotation</strong>: the filter is a rigid rectangle. An object that changes its silhouette breaks that assumption (this is the heart of the <a href="#drone">drone problem</a>).</li>
+      <li><strong>Occlusion, with no way back.</strong> When something passes in front of the target, the peak drops and the position is wrong &mdash; and because there is no detector and no re-detection, a plain DCF tracker has no mechanism to recover once it&rsquo;s truly lost. It keeps tracking <em>something</em>, just not your target.</li>
+      <li><strong>Model contamination / drift.</strong> The online update retrains on whatever is inside the box every frame. Track slightly off-centre, or through a partial occlusion, and the filter learns background and occluder pixels. Errors compound, with no ground truth to correct them. Drift is the slow, silent killer.</li>
+      <li><strong>Distractors.</strong> A second object that resembles the target &mdash; another player in the same kit, a similar texture, a reflection &mdash; produces its own peak. If it out-responds the true target for even a frame, the tracker hops to it and never looks back.</li>
+      <li><strong>Boundary effects.</strong> The circulant/FFT trick assumes the patch wraps around periodically, which isn&rsquo;t true and creates spurious periodic responses near the edges. This is what caps the usable search region; SRDCF and CSRT&rsquo;s reliability map were built specifically to fight it.</li>
+    </ul>
+
+    <div class="callout warm">
+      <div class="label">The one that gets you</div>
+      <p><strong>Drift from contaminated updates.</strong> The other five announce themselves &mdash; the peak collapses, the box jumps. Drift doesn&rsquo;t. The filter keeps returning a confident peak while it slowly relearns itself onto the background or an occluder. By the time it&rsquo;s obviously wrong, the &ldquo;target&rdquo; model is already mostly scenery. Watch peak height; a steady decline is your early warning.</p>
+    </div>
+
+    <h2 id="changing-backgrounds">Does it work over a changing background?</h2>
+
+    <p>This is the question people most often get backwards, so here is the blunt version first: <strong>yes, a changing background is basically fine &mdash; far more fine than your intuition says &mdash; and the things that actually hurt you are not &ldquo;change&rdquo; at all.</strong> To see why, you have to notice what a correlation filter is <em>not</em> doing.</p>
+
+    <p>It is <strong>not background subtraction.</strong> A background-subtraction or frame-differencing system models the scene and flags whatever changed; it assumes a static camera and a stable background, and it falls apart the instant either moves. A correlation filter does the opposite: it localises the target by the <em>target&rsquo;s own learned appearance</em>. It never models the background as a thing to hold constant. So a panning camera, a target flying past wildly different scenery, a moving crowd behind it &mdash; none of that <em>inherently</em> breaks the filter, because none of it is an assumption the filter relies on.</p>
+
+    <div class="two-col">
+      <div>
+        <h3>Breaks background subtraction</h3>
+        <p>Camera pans. Scene lighting shifts. The whole background scrolls. A static-background model lights up everywhere &mdash; useless.</p>
+      </div>
+      <div>
+        <h3>Fine for a correlation filter</h3>
+        <p>Same pans, same scrolling scenery. The filter is still just looking for <em>its</em> peak. As long as the target stays in the search window and looks roughly like itself, the background behind it is irrelevant.</p>
+      </div>
+    </div>
+
+    <p>So where does background actually bite? Three specific places &mdash; and notice none of them is &ldquo;the background changed&rdquo;:</p>
+
+    <ul>
+      <li><strong>Background baked <em>inside</em> the box.</strong> Your initial box is a rectangle, but real targets aren&rsquo;t. A bicycle, an outstretched limb, a thin antenna mast &mdash; a lot of the box is background. The filter learns those pixels too. While that background is constant they even <em>help</em> as free context. But the moment the scene behind the target changes, the part of the model built from the old background is now wrong, the peak weakens, and you drift. This is the real mechanism behind &ldquo;changing background hurt my tracker.&rdquo;</li>
+      <li><strong>Distractors, not change.</strong> A changing background is dangerous mainly when the new scenery happens to <em>contain something that looks like the target</em>. The failure is resemblance, not motion: pan from empty sky onto a tree-line full of dark blobs and one of them may out-peak your dark target.</li>
+      <li><strong>Change driven by fast camera motion.</strong> If the background is changing because the camera is whipping around, the target&rsquo;s apparent motion may exceed the search window &mdash; and now you&rsquo;ve lost it for the <a href="#failures">fast-motion</a> reason, not the background reason.</li>
+    </ul>
+
+    <div class="callout">
+      <div class="label">The key reframing</div>
+      <p>Changing background &ne; problem. <strong>Confusing background = problem.</strong> A correlation filter is essentially immune to <em>scenery change</em> in principle, but vulnerable to (1) look-alike distractors and (2) background pixels trapped inside a rectangular box. <strong>This is precisely what CSRT&rsquo;s spatial reliability map fixes:</strong> by masking the filter down to the object&rsquo;s actual shape, it stops learning the in-box background in the first place &mdash; so if you care about changing backgrounds, reach for CSRT over KCF.</p>
+    </div>
+
+    <h2 id="drone">The drone problem &mdash; a worked verdict</h2>
+
+    <p>You asked specifically about a moving drone that changes its cross-section relative to the camera. It&rsquo;s a sharp test case, because a maneuvering drone trips almost every failure mode on this page at once. Let&rsquo;s walk it through honestly, best case to worst.</p>
+
+    <h3>Background: the one part that&rsquo;s often easy</h3>
+    <p>Against <strong>clear sky</strong>, a drone is close to the ideal target &mdash; high contrast, few distractors, a clean uncluttered response map. This is where DCF looks great. Against a <strong>tree-line, buildings, or ground clutter</strong>, it gets hard fast: low contrast, lots of dark blobs that act as distractors, and genuine confusers (birds, kites, balloons). Per the previous section, it&rsquo;s the <em>clutter and look-alikes</em> that hurt, not the fact that the background scrolls as the drone crosses the frame.</p>
+
+    <h3>Scale: a solvable problem</h3>
+    <p>As the drone flies toward or away from the camera its apparent size changes. Base <strong>KCF has no scale estimation at all</strong> &mdash; the box stays one size, so either it fills with background as the drone shrinks, or it clips the drone as it grows; either way the model is being contaminated. <strong>CSRT (or DSST) estimates scale</strong> and handles this reasonably. So for a drone, CSRT is the floor, not a luxury.</p>
+
+    <h3>Cross-section change: the one that actually breaks it</h3>
+    <p>Here is the crux of your question. As a drone banks, yaws, and pitches, its <em>silhouette</em> changes &mdash; a head-on quad reads as a roughly square blob with four rotor masses; rolled onto its side or edge-on it collapses toward a thin line. Two things change together: the <strong>aspect ratio</strong> of the true bounding box, and the <strong>appearance</strong> itself (out-of-plane rotation reveals a different view).</p>
+
+    <figure>
+      <svg viewBox="0 0 640 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A drone seen head-on fits a wide near-square bounding box; the same drone banked edge-on fits a tall narrow box. A correlation filter estimates translation and one scale factor but cannot change the box aspect ratio between these two views.">
+        <defs>
+          <marker id="arrd" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0,0 L9,5 L0,10 z" fill="#d97757"/>
+          </marker>
+        </defs>
+        <!-- head-on -->
+        <text x="120" y="34" text-anchor="middle" font-family="monospace" font-size="12" fill="#6b6b6b">head-on</text>
+        <rect x="48" y="70" width="144" height="92" rx="3" fill="none" stroke="#1f5f7a" stroke-width="1.6" stroke-dasharray="5 3"/>
+        <!-- quad body -->
+        <line x1="92" y1="92" x2="148" y2="140" stroke="#3a3a3a" stroke-width="3"/>
+        <line x1="148" y1="92" x2="92" y2="140" stroke="#3a3a3a" stroke-width="3"/>
+        <circle cx="92" cy="92" r="11" fill="#6b8e6f" opacity="0.85"/>
+        <circle cx="148" cy="92" r="11" fill="#6b8e6f" opacity="0.85"/>
+        <circle cx="92" cy="140" r="11" fill="#6b8e6f" opacity="0.85"/>
+        <circle cx="148" cy="140" r="11" fill="#6b8e6f" opacity="0.85"/>
+        <text x="120" y="182" text-anchor="middle" font-family="monospace" font-size="11" fill="#1f5f7a">box &asymp; 1.5 : 1 wide</text>
+
+        <!-- arrow + label -->
+        <path d="M250,116 L330,116" fill="none" stroke="#d97757" stroke-width="1.6" marker-end="url(#arrd)"/>
+        <text x="290" y="104" text-anchor="middle" font-family="sans-serif" font-size="12" fill="#8a3f1e">banks / yaws</text>
+
+        <!-- edge-on -->
+        <text x="470" y="34" text-anchor="middle" font-family="monospace" font-size="12" fill="#6b6b6b">edge-on</text>
+        <rect x="446" y="58" width="48" height="120" rx="3" fill="none" stroke="#1f5f7a" stroke-width="1.6" stroke-dasharray="5 3"/>
+        <line x1="470" y1="64" x2="470" y2="172" stroke="#3a3a3a" stroke-width="3"/>
+        <circle cx="470" cy="70" r="9" fill="#6b8e6f" opacity="0.85"/>
+        <circle cx="470" cy="166" r="9" fill="#6b8e6f" opacity="0.85"/>
+        <ellipse cx="470" cy="118" rx="7" ry="16" fill="#3a3a3a" opacity="0.6"/>
+        <text x="470" y="198" text-anchor="middle" font-family="monospace" font-size="11" fill="#1f5f7a">box &asymp; 1 : 2.5 tall</text>
+
+        <text x="560" y="112" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="600" fill="#8a3f1e">aspect</text>
+        <text x="560" y="130" text-anchor="middle" font-family="sans-serif" font-size="13" font-weight="600" fill="#8a3f1e">flips</text>
+      </svg>
+      <figcaption>The same drone, two attitudes. The true box goes from wide to tall and the appearance changes with it. A correlation filter can re-centre (translation) and rescale by one factor, but it cannot change the box&rsquo;s aspect ratio or model the rotated view &mdash; so the rigid filter trained head-on correlates poorly edge-on.</figcaption>
+    </figure>
+
+    <p>A classic correlation filter estimates <strong>translation plus, at most, one isotropic scale</strong>. It cannot stretch the box from wide to tall, and it has no notion of the object having rotated in depth. So a filter trained on the head-on view correlates poorly with the edge-on view: the peak drops, confidence falls, and you&rsquo;re one bad update away from drift. CSRT&rsquo;s spatial mask re-estimates the object region each frame and softens the blow a little, but it does <em>not</em> solve aspect-ratio change &mdash; that capability simply isn&rsquo;t in the model.</p>
+
+    <div class="callout warm">
+      <div class="label">Honest about the evidence</div>
+      <p>That a banking drone breaks the rigid filter is an <em>inference</em> from two well-established facts &mdash; DCF can&rsquo;t model aspect/out-of-plane change, and UAV targets are documented as small, low-texture, and appearance-shifting &mdash; rather than one cited experiment. What <em>is</em> measured: on the Anti-UAV410 benchmark, KCF is a weak baseline (&asymp;&nbsp;34 on the reported state-accuracy metric) versus deeper trackers like ECO and SiamRPN (&asymp;&nbsp;46). For drones, correlation filters are the baselines, not the winners.</p>
+    </div>
+
+    <h3>Fast, erratic motion: the final straw</h3>
+    <p>Drones dart. A quick repositioning can carry the target out of the local search window in a single frame, and combined with camera motion to keep it in view, the apparent jumps get larger still. Mitigations exist &mdash; a wider search region (slower, more distractors), higher capture frame rate (smaller per-frame motion), or a motion model (a Kalman predictor that moves the search window to where the drone is heading) &mdash; but each is a patch on a tracker that wasn&rsquo;t built for it.</p>
+
+    <div class="callout">
+      <div class="label">The verdict</div>
+      <p>KCF/CSRT can hold a drone through <strong>short, smooth, roughly-constant-aspect segments</strong> &mdash; great for a quick lock, a cheap first pass, or sky backgrounds. For <strong>sustained tracking through real maneuvers</strong>, pure DCF is not enough. Build the system as: <strong>CSRT as the floor</strong> (you need its scale estimation and mask), plus a <strong>motion model</strong> to steer the search window, plus <strong>re-detection</strong> &mdash; a small drone detector that re-acquires after loss (the <a href="#frontier">TLD pattern</a>). If you can afford the compute, a learned tracker (SiamRPN++ actually estimates aspect ratio; a transformer tracker; or SAM&nbsp;2 for mask-level tracking) handles the cross-section change that DCF structurally cannot.</p>
+    </div>
+
+    <h2>The variants &mdash; each one fixes a failure above</h2>
+
+    <p>The history of correlation-filter tracking is basically a list of patches for the failures on this page. Read the table as &ldquo;what did this one fix?&rdquo;</p>
+
+    <table style="width:100%; border-collapse: collapse; margin: 16px 0; font-size: 14.5px;">
+      <thead>
+        <tr style="border-bottom: 2px solid var(--rule); text-align: left;">
+          <th style="padding: 8px 6px;">Method</th>
+          <th style="padding: 8px 6px;">Year</th>
+          <th style="padding: 8px 6px;">Features</th>
+          <th style="padding: 8px 6px;">Scale?</th>
+          <th style="padding: 8px 6px;">What it fixed</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;"><strong>MOSSE</strong></td>
+          <td style="padding: 8px 6px;">2010</td>
+          <td style="padding: 8px 6px;">grayscale</td>
+          <td style="padding: 8px 6px;">no</td>
+          <td style="padding: 8px 6px;">the original &mdash; FFT filter at 669&nbsp;fps</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;">CSK</td>
+          <td style="padding: 8px 6px;">2012</td>
+          <td style="padding: 8px 6px;">raw pixels</td>
+          <td style="padding: 8px 6px;">no</td>
+          <td style="padding: 8px 6px;">added the kernel + circulant formalism</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;"><strong>KCF</strong></td>
+          <td style="padding: 8px 6px;">2015</td>
+          <td style="padding: 8px 6px;">HOG</td>
+          <td style="padding: 8px 6px;">no</td>
+          <td style="padding: 8px 6px;">HOG + kernel &rarr; accuracy at high speed</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;">DSST</td>
+          <td style="padding: 8px 6px;">2014</td>
+          <td style="padding: 8px 6px;">HOG</td>
+          <td style="padding: 8px 6px;"><strong>yes</strong></td>
+          <td style="padding: 8px 6px;">a separate 1-D scale filter</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;">SRDCF</td>
+          <td style="padding: 8px 6px;">2015</td>
+          <td style="padding: 8px 6px;">HOG</td>
+          <td style="padding: 8px 6px;">yes</td>
+          <td style="padding: 8px 6px;">spatial regularisation &rarr; killed boundary effects, bigger search</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 6px;"><strong>CSR-DCF</strong> <span class="tag">CSRT</span></td>
+          <td style="padding: 8px 6px;">2017</td>
+          <td style="padding: 8px 6px;">HOG + CN</td>
+          <td style="padding: 8px 6px;">yes</td>
+          <td style="padding: 8px 6px;">spatial + channel reliability &rarr; non-rectangular targets, less in-box background</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>Notice the throughline: scale (DSST), boundary effects (SRDCF), and in-box background / object shape (CSR-DCF) are each a named failure from the top of this page, addressed in turn. What <em>none</em> of them add is aspect-ratio estimation, re-detection, or offline-learned features &mdash; and those three gaps are exactly what the next generation went after.</p>
+
+    <h2 id="frontier">What beats classic DCF today</h2>
+
+    <p>Correlation filters didn&rsquo;t die &mdash; they evolved, and in one important sense they never left at all.</p>
+
+    <ul>
+      <li><strong>Deep-feature DCF.</strong> C-COT (ECCV 2016) and ECO (CVPR 2017), both from Danelljan&rsquo;s group, keep the correlation-filter machinery but swap HOG for deep CNN features, with a big accuracy jump at a real speed cost. The bridge between the hand-crafted era and the deep era.</li>
+      <li><strong>Siamese trackers &mdash; correlation, reborn.</strong> SiamFC (Bertinetto et&nbsp;al., ECCV 2016 workshop) reframes tracking as <em>cross-correlation between a learned embedding of the template and the search region</em> &mdash; literally the same operation as a correlation filter, but with features <em>learned offline</em> on large video datasets instead of HOG. SiamRPN / SiamRPN++ (2018&ndash;19) bolt on a region-proposal head that estimates a full box &mdash; <strong>including aspect ratio</strong>, the thing classic DCF structurally cannot do. (Tellingly, Henriques, a KCF author, is also a SiamFC author.)</li>
+      <li><strong>Transformer trackers.</strong> TransT (CVPR 2021), STARK (ICCV 2021), MixFormer (CVPR 2022), OSTrack, SeqTrack &mdash; attention replaces the correlation step for template&ndash;search matching, and these sit at the top of LaSOT and GOT-10k today.</li>
+      <li><strong>SAM&nbsp;2 (2024).</strong> The modern &ldquo;click then track&rdquo;: click an object, get a <em>mask</em>, and a streaming memory propagates that mask across the whole video. It outputs segmentation rather than a box, so a changing silhouette &mdash; the drone&rsquo;s exact problem &mdash; is handled natively.</li>
+      <li><strong>Long-term tracking via re-detection.</strong> TLD (Kalal, Mikolajczyk &amp; Matas, TPAMI 2012) is the canonical pattern: pair a frame-to-frame tracker with a detector that re-acquires the target after loss. For anything that suffers full occlusion or leaves frame &mdash; drones very much included &mdash; this tracker-plus-detector structure is the robust answer, and it&rsquo;s the same instinct behind detection-based <a href="../bytetrack-guide/index.html">multi-object trackers like ByteTrack</a>.</li>
+    </ul>
+
+    <div class="callout sage">
+      <div class="label">The throughline</div>
+      <p>Cross-correlation never went away. MOSSE correlated a hand-built filter; KCF correlated HOG in a kernel; SiamFC correlates a <em>learned</em> embedding; transformer trackers generalise the match to attention. The 2010 insight &mdash; <em>find the target by the sharp peak of a correlation response</em> &mdash; is still beating inside the state of the art. What changed is where the features come from.</p>
+    </div>
+
+    <h2>So: which should you reach for?</h2>
+    <p>If you need speed, many targets, or a constant-size object: <strong>KCF</strong>. If you need robustness, scale, odd shapes, or you care about changing/cluttered backgrounds: <strong>CSRT</strong> &mdash; it&rsquo;s the sensible default for most click-to-track tasks. If the target changes shape, vanishes and returns, or moves fast (drones, agile wildlife, sports through occlusion): a classic correlation filter alone won&rsquo;t hold it &mdash; pair CSRT with a motion model and re-detection, or move to a learned tracker (SiamRPN++, a transformer tracker) or SAM&nbsp;2. Match the tool to which failure on this page you&rsquo;re actually going to hit.</p>
+
+    <h2>References</h2>
+    <ul>
+      <li>Danelljan, H&auml;ger, Khan, Felsberg. &ldquo;Accurate Scale Estimation for Robust Visual Tracking&rdquo; (DSST). BMVC 2014.</li>
+      <li>Danelljan et&nbsp;al. &ldquo;Learning Spatially Regularized Correlation Filters for Visual Tracking&rdquo; (SRDCF). ICCV 2015.</li>
+      <li>Danelljan, Robinson, Khan, Felsberg. &ldquo;Beyond Correlation Filters&hellip;&rdquo; (C-COT), ECCV 2016; &ldquo;ECO: Efficient Convolution Operators for Tracking,&rdquo; CVPR 2017.</li>
+      <li>Bertinetto et&nbsp;al. &ldquo;Fully-Convolutional Siamese Networks for Object Tracking&rdquo; (SiamFC). ECCVW 2016. Li et&nbsp;al., SiamRPN (CVPR 2018), SiamRPN++ (CVPR 2019).</li>
+      <li>Kalal, Mikolajczyk, Matas. &ldquo;Tracking-Learning-Detection&rdquo; (TLD). IEEE TPAMI 2012.</li>
+      <li>Ravi et&nbsp;al. &ldquo;SAM 2: Segment Anything in Images and Videos.&rdquo; Meta AI, 2024.</li>
+      <li>Anti-UAV challenge &amp; Anti-UAV410 benchmark (CVPR/ICCV workshops, 2020&ndash;2023) &mdash; KCF/CSR-DCF/ECO baselines for drone tracking.</li>
+    </ul>
+
+    <footer class="page-foot">
+      <span>Click-to-Track: Correlation Filters</span>
+      <span><a href="index.html">&larr; Back to overview</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>

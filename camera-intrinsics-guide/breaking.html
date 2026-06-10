@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The functions that ruin the matrix representation. — Camera Intrinsics, the Linear Model</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>Camera Intrinsics, the Linear Model</a>
+    <div class="links">
+      <a href="index.html">Overview</a>
+      <a href="matrix.html">The K matrix</a>
+      <a href="transformations.html">Crop, scale, warp</a>
+      <a href="breaking.html" class="active">Breaking the model</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">03 · when no matrix works</div>
+      <h1>The functions that ruin the matrix representation.</h1>
+      <p class="lead">Some operations can't be folded into any K, no matter how you choose it. Lens distortion, fisheye projection, rolling shutter, panoramas. The single litmus test that tells you in advance: does the operation keep straight lines straight?</p>
+    </header>
+
+    <!-- BODY -->
+
+    <h2>One test decides everything</h2>
+    <p>You don't have to memorise a list of what breaks K and what doesn't. There's a single question that settles it:</p>
+
+    <div class="callout">
+      <div class="label">The litmus test</div>
+      <p><strong>Does the operation keep straight lines straight?</strong> If yes, it's a <em>collineation</em> — a projective-linear map — and it can be folded into the matrix (<a href="transformations.html">K&prime; = A·K</a>). If it <em>bends</em> a straight line, no 3×3 matrix can represent it, full stop. K is built from matrix multiplies, and matrix multiplies can't curve a line. Everything below fails the test.</p>
+    </div>
+
+    <p>The reason traces straight back to <a href="index.html">page one</a>. The linear model is <em>central projection</em> (every ray through one pinhole) followed by an <em>affine read-out</em> of a flat plane. Both halves preserve straightness. Break either — curve the rays, or move the pinhole — and you've left the world a single K can describe.</p>
+
+    <h2>Lens distortion — the rays curve</h2>
+    <p>A real lens is not a perfect pinhole. Light through curved glass bends a little extra, more so toward the edges, so a straight line in the world bows on the sensor. Two flavours: <strong>barrel</strong> (edges bulge out) and <strong>pincushion</strong> (edges pinch in).</p>
+
+    <figure>
+      <svg viewBox="0 0 640 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A straight grid, a barrel-distorted grid, and a pincushion grid">
+        <g fill="none" stroke-width="1.5">
+          <!-- pinhole: straight grid -->
+          <g stroke="#6b8e6f">
+            <rect x="30" y="50" width="120" height="120"/>
+            <line x1="70" y1="50" x2="70" y2="170"/><line x1="110" y1="50" x2="110" y2="170"/>
+            <line x1="30" y1="90" x2="150" y2="90"/><line x1="30" y1="130" x2="150" y2="130"/>
+          </g>
+          <text x="90" y="195" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="12" fill="#3f5a40">pinhole — straight</text>
+
+          <!-- barrel -->
+          <g stroke="#d97757">
+            <path d="M255,55 Q320,42 385,55 Q398,110 385,165 Q320,178 255,165 Q242,110 255,55 Z"/>
+            <path d="M295,49 Q300,110 295,171"/><path d="M345,49 Q340,110 345,171"/>
+            <path d="M249,95 Q320,90 391,95"/><path d="M249,125 Q320,130 391,125"/>
+          </g>
+          <text x="320" y="195" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="12" fill="#8a3f1e">barrel — bulges out</text>
+
+          <!-- pincushion -->
+          <g stroke="#1f5f7a">
+            <path d="M475,55 Q540,68 605,55 Q592,110 605,165 Q540,152 475,165 Q488,110 475,55 Z"/>
+            <path d="M515,55 Q520,110 515,165"/><path d="M565,55 Q560,110 565,165"/>
+            <path d="M475,95 Q540,100 605,95"/><path d="M475,125 Q540,120 605,125"/>
+          </g>
+          <text x="540" y="195" text-anchor="middle" font-family="-apple-system,sans-serif" font-size="12" fill="#163f52">pincushion — pinches in</text>
+        </g>
+      </svg>
+      <figcaption>The same square grid under a pinhole (straight), barrel distortion, and pincushion distortion. The bent lines are the giveaway: no matrix did this.</figcaption>
+    </figure>
+
+    <p>It's modelled, but <em>not</em> with K. Distortion is a polynomial nudge applied to the normalized point <em>before</em> K converts to pixels. The standard <strong>Brown–Conrady</strong> model adds a radial term (depends on distance <em>r</em> from centre) and a tangential term (from lens-sensor misalignment):</p>
+
+    <p class="eq">x<span class="small">d</span> = x(1 + k<span class="small">1</span>r² + k<span class="small">2</span>r⁴ + k<span class="small">3</span>r⁶) + [2p<span class="small">1</span>xy + p<span class="small">2</span>(r²+2x²)]</p>
+
+    <p>with <em>r²</em> = <em>x²</em>+<em>y²</em>. Those <em>r²</em>, <em>r⁴</em>, <em>r⁶</em> powers are the whole point: they're <strong>polynomial in the coordinates</strong>, and no linear map has powers in it. That's why distortion lives in its own <em>(k<sub>1</sub>, k<sub>2</sub>, k<sub>3</sub>, p<sub>1</sub>, p<sub>2</sub>)</em> coefficients alongside K, never inside it.</p>
+
+    <div class="callout sage">
+      <div class="label">How practice copes</div>
+      <p>The standard move is <em>undistort, then use K</em>. You apply the inverse distortion to warp the image back to what an ideal pinhole would have seen — straight lines straight again — and only then is the clean linear K valid. Calibration (e.g. OpenCV's <code>calibrateCamera</code>) estimates K and the distortion coefficients <em>together</em>, precisely because you can't separate "where the centre is" from "how the edges bow" without solving for both at once.</p>
+    </div>
+
+    <h2>Fisheye — the projection law itself is different</h2>
+    <p>Distortion is a <em>perturbation</em> of the pinhole. Fisheye is a different animal: a different projection law on purpose. The pinhole maps an incoming ray at angle <em>θ</em> from the axis to radius <em>r = f·tan(θ)</em> on the sensor. Fisheye lenses deliberately use something tamer, most commonly the <strong>equidistant</strong> law <em>r = f·θ</em>.</p>
+
+    <div class="two-col">
+      <div>
+        <h3>Pinhole: r = f·tan θ</h3>
+        <p>As <em>θ</em> → 90°, tan(θ) → ∞. A 180° field of view would need an infinitely large sensor. The pinhole model <em>literally cannot</em> see a full hemisphere — it's not a limitation of the matrix's parameters, it's the geometry.</p>
+      </div>
+      <div>
+        <h3>Fisheye: r = f·θ</h3>
+        <p>Finite at 90° and beyond — a 180°+ field of view fits on a real sensor. The price: straight lines bow dramatically. Other laws exist too (equisolid, stereographic), each its own curve.</p>
+      </div>
+    </div>
+
+    <p>Because the projection law is non-linear in <em>θ</em>, there is no K — and no distortion polynomial bolted onto a pinhole — that captures a true fisheye well. This is why toolkits ship a <em>separate</em> fisheye model (OpenCV's <code>cv::fisheye</code> namespace) with its own calibration and its own four coefficients, rather than reusing the pinhole path.</p>
+
+    <h2>Rolling shutter — there isn't one camera, there are hundreds</h2>
+    <p>Most CMOS sensors don't expose every pixel at once; they read out row by row, top to bottom, each row a fraction of a millisecond after the last. If the camera or subject moves during that sweep, <em>each row was taken by a camera in a slightly different pose</em>. A single static <em>K[R&nbsp;|&nbsp;t]</em> describes one camera at one instant — but a rolling-shutter frame is a stack of hundreds of them, one per row.</p>
+    <p>The visible symptoms are the giveaway: vertical poles lean (the "skew" effect), fast wheels turn into ellipses, propellers melt into wobbling blobs. None of that is a property a 3×3 matrix can hold, because the matrix has no axis for <em>time</em>. The fix is a model that makes the pose a function of row, not a single matrix.</p>
+
+    <h2>The one that looks like it should break K but doesn't</h2>
+    <div class="callout warm">
+      <div class="label">Geometric vs photometric</div>
+      <p><strong>Vignetting</strong> — the darkening toward image corners — feels like a lens defect that ought to mess with K. It doesn't. Vignetting changes pixel <em>brightness</em>, not pixel <em>position</em>. A 3D point still lands at exactly the pixel K predicts; it's just dimmer there. That's a <em>photometric</em> effect, orthogonal to the <em>geometric</em> model K describes. The test still works: vignetting doesn't bend any line, so it leaves K untouched. Keep the two axes separate — geometry is "where," photometry is "how bright."</p>
+    </div>
+
+    <h2>The map of what breaks it</h2>
+    <p>Sorted by the litmus test:</p>
+    <ul>
+      <li><strong>Foldable into K&prime; = A·K</strong> — crop, resize, flip, in-plane rotation, shear. Lines stay straight.</li>
+      <li><strong>Geometric, breaks K (needs extra non-linear model)</strong> — radial/tangential distortion, fisheye and other wide projections, rolling shutter, panorama/equirectangular stitching (multiple viewpoints, so not even <em>central</em>), and any per-pixel warp field. Lines bend, or the single-pinhole assumption fails.</li>
+      <li><strong>Doesn't touch K at all</strong> — vignetting, white balance, blur, noise, exposure. Photometric, not geometric.</li>
+    </ul>
+
+    <details>
+      <summary>Why "lines stay straight" is the exact right test, not a rough heuristic</summary>
+      <p>A map of projective space that sends collinear points to collinear points is called a <em>collineation</em>, and the fundamental theorem of projective geometry says (over the reals, in dimension ≥ 2) every collineation is a projective-linear transformation — i.e. multiplication by an invertible matrix in homogeneous coordinates. So "preserves straight lines" and "is representable by a matrix" are not merely correlated; they're <em>the same condition</em>. That's why the test is exact: an operation can be absorbed into K (as some <em>A·K</em>) if and only if it is a collineation of the image plane. Distortion fails it pointwise — a straight world line images to a curve — and that single fact is a complete proof that no K exists for it.</p>
+      <p><span class="tag">source</span> <span style="font-size:14px;color:var(--muted)">Hartley &amp; Zisserman ch. 2–3 (projective transformations); OpenCV docs (distortion, fisheye).</span></p>
+    </details>
+
+    <h2>Where this leaves you</h2>
+    <p>The linear model is a deal: give up curved rays, moving pinholes, and time, and in return you get a single clean matrix that you can crop, scale, flip and rotate just by multiplying. Most of computer vision takes that deal — and handles the exceptions by <em>undistorting first</em>, so that by the time K is applied, the world really does look like it came through a pinhole. K isn't the whole camera. It's the honest, linear core that everything else is measured against.</p>
+
+    <footer class="page-foot">
+      <span>Camera Intrinsics, the Linear Model</span>
+      <span><a href="index.html">&larr; Back to overview</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>

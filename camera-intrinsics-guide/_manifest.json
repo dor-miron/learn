@@ -1,0 +1,33 @@
+{
+  "title": "Camera Intrinsics, the Linear Model",
+  "pages": [
+    {
+      "slug": "index",
+      "nav_label": "Overview",
+      "eyebrow": "A short interactive textbook",
+      "h1": "Camera intrinsics: from XYZ in the world to a pixel.",
+      "lead": "The intrinsic matrix K is the camera's own fingerprint — the part of projection that has nothing to do with where the camera is, only how it turns rays into pixels. We'll nail down exactly what K does, play with every knob, and then watch what happens to it when you crop, resize, warp, or distort the image."
+    },
+    {
+      "slug": "matrix",
+      "nav_label": "The K matrix",
+      "eyebrow": "01 · the matrix itself",
+      "h1": "Every entry of K, and a knob for each.",
+      "lead": "K is a 3×3 upper-triangular matrix with five meaningful numbers. Here's what each one physically means — and a live demo where you drag fx, fy, cx, cy, and skew and watch a 3D scene re-project in real time."
+    },
+    {
+      "slug": "transformations",
+      "nav_label": "Crop, scale, warp",
+      "eyebrow": "02 · transforms that keep K a matrix",
+      "h1": "Crop, rescale, flip, rotate — one rule: K′ = A·K.",
+      "lead": "Almost every image edit you do in pixel space is an affine transform, and an affine transform on the image just left-multiplies K. Cropping shifts the principal point; resizing scales everything; flips and rotations are the same rule with a different A. Worked formulas and a live before/after."
+    },
+    {
+      "slug": "breaking",
+      "nav_label": "Breaking the model",
+      "eyebrow": "03 · when no matrix works",
+      "h1": "The functions that ruin the matrix representation.",
+      "lead": "Some operations can't be folded into any K, no matter how you choose it. Lens distortion, fisheye projection, rolling shutter, panoramas. The single litmus test that tells you in advance: does the operation keep straight lines straight?"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "title": "Click-to-Track: Correlation Filters",
+  "pages": [
+    {
+      "slug": "index",
+      "nav_label": "How it works",
+      "eyebrow": "A short interactive field guide",
+      "h1": "Track anything with a click",
+      "lead": "You draw one box on frame 1 — no detector, no labels, no class. A discriminative correlation filter (KCF, CSRT) learns that patch and re-finds it every frame, at hundreds of frames per second. Here's the trick that makes it work, and why it's faster than it has any right to be."
+    },
+    {
+      "slug": "limits",
+      "nav_label": "Limits & frontier",
+      "eyebrow": "02 · where it breaks",
+      "h1": "Where it fails, changing backgrounds, and the drone problem",
+      "lead": "The same things that make correlation filters fast make them brittle. A taxonomy of how they lose the target, a straight answer on whether they survive a changing background, a worked verdict on tracking a maneuvering drone, and the trackers that fixed each weakness."
+    }
+  ]
+}
