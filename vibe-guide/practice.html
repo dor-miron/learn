@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Parameters, failure modes, and what came after — ViBe: Background as a Bag of Samples</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>ViBe: Background as a Bag of Samples</a>
+    <div class="links">
+      <a href="index.html">The idea</a>
+      <a href="update.html">The update policy</a>
+      <a href="practice.html" class="active">In practice</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">03 &middot; using it for real</div>
+      <h1>Parameters, failure modes, and what came after</h1>
+      <p class="lead">Where the four knobs actually matter, the six ways ViBe fails on real footage, how ViBe+ and PBAS patched it, and the patent you should know about before shipping.</p>
+    </header>
+
+    <h2 id="knobs">Four parameters, and only one of them is interesting</h2>
+
+    <p>ViBe is often described as &ldquo;almost parameterless&rdquo;. The authors themselves later qualified that: it <em>&ldquo;has to be understood as insensitive to a <strong>slight</strong> modification of the threshold&rdquo;</em>. There are exactly four knobs, and they are not equally important.</p>
+
+    <table style="width:100%; border-collapse: collapse; margin: 16px 0; font-size: 14.5px;">
+      <thead>
+        <tr style="border-bottom: 2px solid var(--rule); text-align: left;">
+          <th style="padding: 8px 6px;">Knob</th>
+          <th style="padding: 8px 6px;">Paper</th>
+          <th style="padding: 8px 6px;">Code</th>
+          <th style="padding: 8px 6px;">What it really controls</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;"><strong><em>N</em></strong><br><span class="tag">samples</span></td>
+          <td style="padding: 8px 6px;">20</td>
+          <td style="padding: 8px 6px;">30</td>
+          <td style="padding: 8px 6px;">Model <em>resolution</em> &mdash; how many background modes fit. Accuracy rises with <em>N</em> then plateaus; the paper picks 20 at &ldquo;the beginning of the plateau&rdquo;. Costs <em>N</em> bytes/pixel/channel but barely any time (the classifier early-exits).</td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;"><strong><em>R</em></strong><br><span class="tag">radius</span></td>
+          <td style="padding: 8px 6px;">20</td>
+          <td style="padding: 8px 6px;">10</td>
+          <td style="padding: 8px 6px;">Sensitivity. Low <em>R</em> &rarr; complete detections plus noise; high <em>R</em> &rarr; clean masks that swallow low-contrast objects. Never actually swept in the paper &mdash; 20 is called <em>&ldquo;an educated choice, which corresponds to a perceptible difference in color.&rdquo;</em></td>
+        </tr>
+        <tr style="border-bottom: 1px solid var(--rule);">
+          <td style="padding: 8px 6px;"><strong>#min</strong><br><span class="tag">matches</span></td>
+          <td style="padding: 8px 6px;">2</td>
+          <td style="padding: 8px 6px;">2</td>
+          <td style="padding: 8px 6px;">Also sensitivity, via the ratio #min/<em>N</em>. Swept in the paper (2 and 3 tie); 2 wins on cost. Prefer tuning <em>N</em>: raising #min adds work every frame, raising <em>N</em> mostly doesn&rsquo;t.</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px 6px;"><strong>&phi;</strong><br><span class="tag">subsampling</span></td>
+          <td style="padding: 8px 6px;">16</td>
+          <td style="padding: 8px 6px;">8</td>
+          <td style="padding: 8px 6px;"><strong>The one that matters.</strong> Sets the adaptation timescale: how fast ghosts die <em>and</em> how fast stopped objects get absorbed &mdash; the same dial, opposite desires. The only parameter the authors revisited in 2012.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>Two honest caveats about that table. The <em>N</em> and #min sweeps in the paper are single-sequence, single-metric experiments (Figs. 3&ndash;4, on one PETS sequence, scored by percentage of correct classification) &mdash; treat &ldquo;insensitive above 20&rdquo; as an observation, not a theorem. And the paper/code split in columns two and three is real: the released implementation ships different defaults <em>and</em> an L1 color distance, so a reimplementation faithful to the paper will not match the reference binary.</p>
+
+    <div class="callout">
+      <div class="label">If you tune one thing, tune &phi;</div>
+      <p>Everything about how ViBe <em>feels</em> on your footage is &phi;. Ghosts hanging around too long? Lower it. Parked cars disappearing into the background before your tracker gets a lock? Raise it. The authors&rsquo; 2012 recommendation was to move from 16 to <strong>5</strong>, and all the way down to <strong>1</strong> when the camera shakes &mdash; a 16&times; faster adaptation rate than the paper&rsquo;s published default.</p>
+    </div>
+
+    <h2 id="failures">Six ways it breaks</h2>
+
+    <p>ViBe&rsquo;s design is a set of bets, and each bet has a scene that calls it. Here is the honest list &mdash; what happens, and whether the original algorithm has any answer at all.</p>
+
+    <h3>1. Camouflage &mdash; and the fixed radius that causes it</h3>
+    <p>If the object&rsquo;s color is within <em>R</em> of the background&rsquo;s, it is background. The paper concedes this only obliquely (detections are sharp <em>&ldquo;given that they do not share similar colors with the background&rdquo;</em>), but it is the dominant source of false negatives in practice: an independent reproduction shows a person&rsquo;s dark trousers swallowed at high <em>R</em> while their bright shirt is detected cleanly. <strong>Built-in mitigation: none</strong> &mdash; <em>R</em> is a single global constant, blind to how noisy or textured this particular pixel is. That single weakness is what motivated both major successors.</p>
+
+    <h3>2. Sudden illumination change</h3>
+    <p>Someone flips a light switch and every pixel jumps outside its sphere at once: the whole frame goes foreground. ViBe has a beautiful <em>remedy</em> &mdash; discard the model and re-initialize from one frame, and you&rsquo;re segmenting again two frames later. What it does not have is a <strong>trigger</strong>: there is no illumination-change detector anywhere in the published algorithm. Saying &ldquo;ViBe handles sudden illumination changes&rdquo; is wrong; saying &ldquo;ViBe can recover from one in a single frame, if <em>you</em> detect it&rdquo; is right.</p>
+
+    <h3>3. Dynamic backgrounds</h3>
+    <p>Water, foliage, escalators. The sample model is multimodal for free, which helps, and random subsampling deliberately avoids locking onto periodic motion. But there is <em>&ldquo;no explicit mechanism&rdquo;</em> for multimodality &mdash; if a wave pattern has more distinct states than <em>N</em> can hold, you get speckle. This is ViBe+&rsquo;s single biggest measured improvement (see the table below), which tells you how much room there was.</p>
+
+    <h3>4. Camera jitter</h3>
+    <p>Here the paper slightly overclaims. Because samples are shared between neighbouring models, <em>&ldquo;small displacements of the camera introduce very few erroneous foreground detections&rdquo;</em> &mdash; and for genuine sub-pixel vibration that&rsquo;s true; spatial propagation is doing free registration. But on the CDnet jitter category, plain ViBe scores <em>worse</em> than the previous best method, and even mild drift on an aerial view lights up every building edge. Real jitter needs real stabilization; ViBe+&rsquo;s answer is merely to detect the shaking and crank &phi; to 1.</p>
+
+    <h3>5. Objects that stop, and ghosts that linger</h3>
+    <p>Covered in detail <a href="update.html#ghosts">on the previous page</a>: the ghost/stopped-object asymmetry is ViBe&rsquo;s best trick, but neither side of it is <em>controllable</em>. Absorption of a stopped object is driven by sensor noise, and ghost erosion &mdash; while genuinely faster than the alternatives &mdash; still leaves false detections up for a noticeable stretch. &ldquo;Intermittent object motion&rdquo; is the worst CDnet category for both ViBe and ViBe+ by a wide margin.</p>
+
+    <h3>6. Shadows</h3>
+    <p>ViBe has no shadow model whatsoever, and the authors are refreshingly direct about why: shadow handling is <em>&ldquo;less straightforward for sample based models&rdquo;</em> than for probabilistic ones, since there is no mean to compare a candidate against. Their conclusion, verbatim: <em>&ldquo;Ultimately, we decided to ignore shadows and consider shadows as foreground pixels.&rdquo;</em> The measured result is exactly what you&rsquo;d expect &mdash; ViBe+ scores 1.6565 on the shadow category against ViBe&rsquo;s 1.6547, i.e. no change at all. If shadows matter to you, that is a layer you add yourself.</p>
+
+    <div class="callout warm">
+      <div class="label">A seventh, structural one: no object-level reasoning</div>
+      <p>Every decision ViBe makes is per-pixel and independent. It cannot know that these 4,000 foreground pixels form one person-shaped blob and those nine are noise. Every mature system built on background subtraction bolts connected-component filtering on top &mdash; and that is exactly the direction the sequels went.</p>
+    </div>
+
+    <h2 id="postproc">The post-processing you&rsquo;ll see is not in the paper</h2>
+
+    <p>Nearly every ViBe tutorial ends with a <code>cv2.morphologyEx</code> open-then-close. That is common practice, not the algorithm. The 2011 paper contains <em>no</em> post-processing step and argues it shouldn&rsquo;t need one: <em>&ldquo;The low FP rate of ViBe eliminates the need for any post-processing, which further alleviates the total computational cost.&rdquo;</em> It even criticizes competitors for needing filtering that <em>&ldquo;reduces the framerate significantly.&rdquo;</em></p>
+
+    <p>What actually exists, in order of provenance: <strong>ViBe+ (2012)</strong> adds connected-component filtering &mdash; not morphology &mdash; with deliberately different rules for the output mask (drop foreground blobs &le;10&nbsp;px, fill holes &le;20&nbsp;px, always keep border-touching blobs) and the updating mask (fill holes &le;50&nbsp;px only). The <strong>reference C implementation</strong> applies a 3&times;3 median filter by default, which appears in neither paper &mdash; and note its published benchmark timings are taken with that filter <em>off</em>.</p>
+
+    <h2 id="successors">What came after &mdash; and what each one fixed</h2>
+
+    <p>ViBe&rsquo;s influence is easiest to see in the fact that both major successors keep its sample model verbatim and attack the same weakness: <strong>the global constant <em>R</em></strong>.</p>
+
+    <h3>ViBe+ &mdash; the authors&rsquo; own patch list</h3>
+    <p>Van Droogenbroeck &amp; Paquot, CVPRW 2012. Their own summary: <em>&ldquo;a different distance function and thresholding criterion, a separation between updating and output masks, with proper filtering operations on them, an inhibition of propagation for some pixels in the updating mask, the detection of blinking pixels, and an increased updating factor, especially when there is jitter on the camera.&rdquo;</em> Unpacked, the interesting ones:</p>
+    <ul>
+      <li><strong>Adaptive threshold.</strong> The fixed <em>R</em> becomes 0.5&nbsp;&times;&nbsp;&sigma;<span class="small">m</span> (the standard deviation of that pixel&rsquo;s own samples), clamped to [20,&nbsp;40], plus a separate color-distortion test &mdash; a direct answer to failure&nbsp;1.</li>
+      <li><strong>Two masks, not one.</strong> The mask you output and the mask that gates updating are filtered differently. Simple, and load-bearing for everything else.</li>
+      <li><strong>Edge-inhibited propagation.</strong> Diffusion is blocked where the image gradient exceeds 50, so background samples cannot cross an object boundary &mdash; a sharper version of the color-match gate that keeps <em>stopped objects</em> in the foreground while still eroding ghosts.</li>
+      <li><strong>Blinking-pixel suppression.</strong> A per-pixel level in [0,150], +15 when a border pixel&rsquo;s label flips, &minus;1 otherwise; above 30 the pixel is excluded from <em>updating</em> (not from the output). Note this is the counter-based mechanism the original deliberately avoided.</li>
+      <li><strong>Jitter detection.</strong> Track 100 KLT features for 100 frames; if fewer than half stay put, declare the camera shaky and set &phi;&nbsp;=&nbsp;1. A detector, not a stabilizer &mdash; no warping is performed.</li>
+    </ul>
+
+    <p>The results, in percentage of bad classifications (lower is better) on the CDnet 2012 categories:</p>
+
+    <table style="width:100%; border-collapse: collapse; margin: 16px 0; font-size: 14.5px;">
+      <thead>
+        <tr style="border-bottom: 2px solid var(--rule); text-align: left;">
+          <th style="padding: 8px 6px;">Category</th>
+          <th style="padding: 8px 6px;">ViBe</th>
+          <th style="padding: 8px 6px;">ViBe+</th>
+          <th style="padding: 8px 6px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom: 1px solid var(--rule);"><td style="padding: 8px 6px;">dynamic background</td><td style="padding: 8px 6px;">1.2796</td><td style="padding: 8px 6px;">0.3838</td><td style="padding: 8px 6px; color:#3f5a40;">3.3&times; better</td></tr>
+        <tr style="border-bottom: 1px solid var(--rule);"><td style="padding: 8px 6px;">camera jitter</td><td style="padding: 8px 6px;">4.0150</td><td style="padding: 8px 6px;">1.8473</td><td style="padding: 8px 6px; color:#3f5a40;">2.2&times; better</td></tr>
+        <tr style="border-bottom: 1px solid var(--rule);"><td style="padding: 8px 6px;">intermittent object motion</td><td style="padding: 8px 6px;">7.7432</td><td style="padding: 8px 6px;">5.4281</td><td style="padding: 8px 6px;">still the worst category</td></tr>
+        <tr style="border-bottom: 1px solid var(--rule);"><td style="padding: 8px 6px;">thermal</td><td style="padding: 8px 6px;">3.1271</td><td style="padding: 8px 6px;">2.8201</td><td style="padding: 8px 6px;"></td></tr>
+        <tr style="border-bottom: 1px solid var(--rule);"><td style="padding: 8px 6px;">shadow</td><td style="padding: 8px 6px;">1.6547</td><td style="padding: 8px 6px;">1.6565</td><td style="padding: 8px 6px; color:#8a3f1e;">no change</td></tr>
+        <tr style="border-bottom: 1px solid var(--rule);"><td style="padding: 8px 6px;">baseline</td><td style="padding: 8px 6px;">0.8869</td><td style="padding: 8px 6px;">0.9631</td><td style="padding: 8px 6px; color:#8a3f1e;">slightly worse</td></tr>
+        <tr><td style="padding: 8px 6px;"><strong>overall</strong></td><td style="padding: 8px 6px;"><strong>3.2035</strong></td><td style="padding: 8px 6px;"><strong>2.1824</strong></td><td style="padding: 8px 6px;">precision 0.73 &rarr; 0.83</td></tr>
+      </tbody>
+    </table>
+
+    <p>Read that table honestly: a big win on hard categories, a small <em>regression</em> on easy ones, nothing on shadows, and recall essentially unmoved (0.6758&nbsp;&rarr;&nbsp;0.6840) &mdash; the gains are almost entirely fewer false positives. The authors also decline to attribute credit, stating plainly that <em>&ldquo;it is very difficult to isolate the effects of each change separately&hellip; Therefore, we only present the global results.&rdquo;</em> <strong>There is no ablation.</strong> Which of those five modifications earned the improvement is, formally, unknown.</p>
+
+    <h3>PBAS and SuBSENSE &mdash; make the parameters feedback-controlled</h3>
+    <p><strong>PBAS</strong> (Hofmann, Tiefenbacher &amp; Rigoll, CVPRW 2012 &mdash; presented at the same workshop as ViBe+) keeps the sample model and promotes both <em>R</em> and the update rate <em>T</em> to <strong>per-pixel state variables</strong>, driven by feedback controllers steered by an estimate of local background dynamics. A pixel on choppy water raises its own threshold; a pixel on a blank wall lowers it.</p>
+    <p><strong>SuBSENSE</strong> (St-Charles, Bilodeau &amp; Bergevin, IEEE TIP 2015) does the same but swaps raw color for <strong>LBSP</strong> features &mdash; local binary similarity patterns, which encode local texture and are far more robust to illumination change than an intensity comparison. It remains one of the strongest non-deep methods on CDnet.</p>
+
+    <table style="width:100%; border-collapse: collapse; margin: 16px 0; font-size: 14.5px;">
+      <thead>
+        <tr style="border-bottom: 2px solid var(--rule); text-align: left;">
+          <th style="padding: 8px 6px;">Method</th>
+          <th style="padding: 8px 6px;">Year</th>
+          <th style="padding: 8px 6px;">Model</th>
+          <th style="padding: 8px 6px;">CDnet&nbsp;2012 F</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom: 1px solid var(--rule);"><td style="padding: 8px 6px;"><strong>SuBSENSE</strong></td><td style="padding: 8px 6px;">2015</td><td style="padding: 8px 6px;">samples + LBSP, self-tuning</td><td style="padding: 8px 6px;">0.8260</td></tr>
+        <tr style="border-bottom: 1px solid var(--rule);"><td style="padding: 8px 6px;"><strong>PBAS</strong></td><td style="padding: 8px 6px;">2012</td><td style="padding: 8px 6px;">samples, per-pixel <em>R</em> and <em>T</em></td><td style="padding: 8px 6px;">0.7532</td></tr>
+        <tr style="border-bottom: 1px solid var(--rule);"><td style="padding: 8px 6px;">KNN (Zivkovic)</td><td style="padding: 8px 6px;">2006</td><td style="padding: 8px 6px;">non-parametric density</td><td style="padding: 8px 6px;">0.6785</td></tr>
+        <tr style="border-bottom: 1px solid var(--rule);"><td style="padding: 8px 6px;">KDE (Elgammal)</td><td style="padding: 8px 6px;">2000</td><td style="padding: 8px 6px;">kernel density over samples</td><td style="padding: 8px 6px;">0.6719</td></tr>
+        <tr style="border-bottom: 1px solid var(--rule);"><td style="padding: 8px 6px;">GMM (Stauffer &amp; Grimson)</td><td style="padding: 8px 6px;">1999</td><td style="padding: 8px 6px;">mixture of <em>K</em> Gaussians</td><td style="padding: 8px 6px;">0.6624</td></tr>
+        <tr><td style="padding: 8px 6px;">MOG2 (Zivkovic)</td><td style="padding: 8px 6px;">2004</td><td style="padding: 8px 6px;">GMM, adaptive <em>K</em></td><td style="padding: 8px 6px;">0.6596</td></tr>
+      </tbody>
+    </table>
+
+    <p><strong>ViBe itself is not on that leaderboard</strong> &mdash; the authors submitted ViBe+, and the widely-circulated &ldquo;ViBe &asymp; 0.68 on CDnet&rdquo; figure traces to secondary papers rather than the benchmark. The safe statement is the qualitative one: ViBe sits around or a little above the GMM family it displaced, and clearly below the feedback-driven methods it inspired &mdash; at a fraction of their compute. (Modern supervised deep methods top these boards outright, though the usual caveat applies: the leaders are trained on frames drawn from the very sequences they are scored on.)</p>
+
+    <details>
+      <summary>A working greyscale ViBe in about 30 lines of NumPy</summary>
+      <p>Faithful to the paper (spatial init, conservative update, random replacement, two 1/&phi; draws, 8-neighbour propagation). Vectorized, so it evaluates all <em>N</em> comparisons rather than early-exiting &mdash; fine for clarity, not how you&rsquo;d write it in C.</p>
+<pre><code>import numpy as np
+
+N, R, MIN_MATCH, PHI = 20, 20, 2, 16
+
+def init_model(frame, rng):
+    """M0(x): N values drawn at random from x's 8-neighbourhood in frame 0."""
+    h, w = frame.shape
+    padded = np.pad(frame, 1, mode='edge')
+    dy, dx = rng.integers(-1, 2, size=(2, N, h, w))
+    ys = np.arange(h)[None, :, None] + 1 + dy
+    xs = np.arange(w)[None, None, :] + 1 + dx
+    return padded[ys, xs]                      # (N, h, w)
+
+def step(model, frame, rng):
+    h, w = frame.shape
+    d = np.abs(model.astype(np.int16) - frame.astype(np.int16))
+    fg = (d &lt; R).sum(axis=0) &lt; MIN_MATCH       # the whole classifier
+    bg = ~fg
+
+    # 3. conservative + memoryless update of the pixel's own model
+    hit = bg &amp; (rng.integers(0, PHI, size=(h, w)) == 0)
+    yy, xx = np.nonzero(hit)
+    model[rng.integers(0, N, size=yy.size), yy, xx] = frame[yy, xx]
+
+    # 4. propagate v(x) into one random neighbour's model
+    hit = bg &amp; (rng.integers(0, PHI, size=(h, w)) == 0)
+    yy, xx = np.nonzero(hit)
+    ny = np.clip(yy + rng.integers(-1, 2, size=yy.size), 0, h - 1)
+    nx = np.clip(xx + rng.integers(-1, 2, size=xx.size), 0, w - 1)
+    model[rng.integers(0, N, size=yy.size), ny, nx] = frame[yy, xx]
+
+    return fg                                  # foreground mask
+</code></pre>
+      <p>Drive it with <code>rng = np.random.default_rng(0)</code>, <code>model = init_model(first_gray, rng)</code>, then <code>mask = step(model, gray, rng)</code> per frame. Two deliberate simplifications: the neighbour offset can come out (0,&nbsp;0), which just means the pixel seeds itself, and <code>np.clip</code> at the borders biases edge pixels slightly &mdash; both are the sort of detail real implementations handle explicitly.</p>
+      <p>Run on a synthetic sequence (textured static background, a bright square tracking across it) this reproduces both behaviours from the previous page: the object is detected with full recall, and the trail it leaves behind &mdash; a textbook ghost &mdash; erodes steadily once the object is gone, shrinking by roughly half over 300 frames at &phi;&nbsp;=&nbsp;16. Drop &phi; and the same trail clears in a fraction of the time. It is a satisfying thing to watch, and a good sanity check that your propagation step is wired up correctly: <strong>if ghosts never fade, your neighbour update is broken.</strong></p>
+    </details>
+
+    <h2 id="license">The licensing situation changed in January 2026</h2>
+
+    <p>For most of its life, ViBe&rsquo;s patent was the first thing anyone told you about it, and the reason you won&rsquo;t find it in OpenCV. The University of Li&egrave;ge holds a granted family on the method &mdash; <strong>US&nbsp;8,009,918&nbsp;B2</strong> (&ldquo;Visual background extractor&rdquo;, inventors Van Droogenbroeck and Barnich), plus EP&nbsp;2&nbsp;015&nbsp;252 and JP&nbsp;4699564, from WO&nbsp;2009/007198, priority July&nbsp;2007.</p>
+
+    <div class="callout sage">
+      <div class="label">What changed, and what didn&rsquo;t</div>
+      <p>The authors&rsquo; repository now states: <em>&ldquo;[NEW FROM 01/2026] ViBe is now totally free, even for commercial usages!&rdquo;</em>, and the code is released under <strong>Apache License 2.0</strong> &mdash; which carries an express, irrevocable patent grant from its contributors.</p>
+      <p>The patent did <strong>not</strong> expire; US&nbsp;8,009,918&nbsp;B2 remains active with an anticipated expiration around mid-2028. So the right thing to say is <em>&ldquo;relicensed&rdquo;</em>, not <em>&ldquo;expired&rdquo;</em>. Practically it makes no difference for use of the official code &mdash; but if your compliance process cares about the distinction, that&rsquo;s it. (This guide is not legal advice; check the repository&rsquo;s current terms yourself.)</p>
+    </div>
+
+    <p>A historical footnote worth knowing, because it explains a lot of confused forum threads: pre-2026, third-party reimplementations shipped under permissive licenses (BGSLibrary is MIT) did <em>not</em> convey a patent license &mdash; MIT has no patent grant. An MIT-licensed copy of a patented algorithm gives you copyright permission and nothing else. That gap is what the Apache-2.0 release closes.</p>
+
+    <h2 id="code">Where to get it</h2>
+
+    <ul>
+      <li><strong>Not in OpenCV.</strong> Neither core nor <code>bgsegm</code> ships ViBe. The closest things OpenCV gives you are <code>createBackgroundSubtractorKNN</code> (Zivkovic&rsquo;s non-parametric estimator) and, in contrib, <code>BackgroundSubtractorGSOC</code> and <code>BackgroundSubtractorLSBP</code> &mdash; both genuinely sample-based with an <code>nSamples</code> parameter, and LSBP in the texture-feature lineage that SuBSENSE started.</li>
+      <li><strong>The authors&rsquo; reference implementation</strong> &mdash; <a href="https://github.com/vandroogenbroeckmarc/vibe">github.com/vandroogenbroeckmarc/vibe</a>, C and C++, Apache-2.0. Read it before trusting any tutorial: this is where the L1 distance, the <em>N</em>&nbsp;=&nbsp;30 default, the sample-swapping optimization and the default median filter live.</li>
+      <li><strong>BGSLibrary</strong> (Andrews Sobral, MIT) bundles ViBe alongside PBAS, SuBSENSE, LOBSTER, PAWCS and ~40 others behind one interface, with Python bindings as <code>pybgs</code>. The fastest way to run five algorithms on your own footage and see the differences.</li>
+      <li><strong>The IPOL review</strong> (Bou et al., 2022) &mdash; a peer-reviewed reproduction with an online demo you can run in a browser, and the best documentation of where the paper and the implementations diverge.</li>
+    </ul>
+
+    <div class="callout">
+      <div class="label">The verdict</div>
+      <p>Reach for ViBe when the camera is <strong>fixed</strong>, the compute budget is <strong>tight</strong>, and you need a foreground mask <strong>immediately</strong> &mdash; embedded sensors, a cheap first-stage proposal generator ahead of a detector or <a href="../bytetrack-guide/index.html">tracker</a>, anything where 200&nbsp;fps on one core matters. It is still an excellent default in that regime, and the single-frame initialization is a genuine operational advantage no GMM offers.</p>
+      <p>Don&rsquo;t reach for it if the camera moves, shadows matter, or the scene is dominated by objects that stop and start &mdash; and if you have the compute and want the accuracy, use SuBSENSE, which is ViBe&rsquo;s idea with the fixed radius that causes most of its failures replaced by something that tunes itself.</p>
+    </div>
+
+    <p>The lasting lesson is smaller and more portable than the algorithm. Everyone before ViBe assumed that modelling a pixel meant <em>estimating</em> something &mdash; a mean, a mixture, a density. ViBe&rsquo;s bet was that a handful of remembered observations answers the actual question better than a fitted model of them does, and that the way you <em>forget</em> those observations matters more than any of the modelling machinery you skipped. Both halves turned out to be right. See <a href="index.html#references">the references</a> for the primary sources.</p>
+
+    <footer class="page-foot">
+      <span>ViBe: Background as a Bag of Samples</span>
+      <span><a href="index.html">&larr; Back to overview</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>

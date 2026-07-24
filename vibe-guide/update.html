@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Forgetting at random is the whole trick — ViBe: Background as a Bag of Samples</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>ViBe: Background as a Bag of Samples</a>
+    <div class="links">
+      <a href="index.html">The idea</a>
+      <a href="update.html" class="active">The update policy</a>
+      <a href="practice.html">In practice</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">02 &middot; the actual invention</div>
+      <h1>Forgetting at random is the whole trick</h1>
+      <p class="lead">The sample model is simple enough to fit on a napkin. What makes ViBe work is how the samples get replaced: conservatively, randomly, sub-sampled in time, and &mdash; the strange one &mdash; leaking sideways into the neighbours.</p>
+    </header>
+
+    <p>A background model that never changes is worthless after ten minutes. The sun moves, the lights change, someone parks a van. So every background-subtraction method has an update rule, and in a sample-based method that rule has to answer two questions:</p>
+
+    <p><strong>Who is allowed to update the model?</strong> And <strong>which sample gets evicted to make room?</strong></p>
+
+    <p>Both of ViBe&rsquo;s answers are contrarian. To the first: <em>only pixels we already believe are background</em> &mdash; a strict rule with a famous failure mode. To the second: <em>an arbitrary one, chosen by coin flip</em> &mdash; which sounds like giving up, and is in fact the paper&rsquo;s main contribution. Add a third idea nobody had bolted on before &mdash; letting a pixel&rsquo;s observation update its <em>neighbours&rsquo;</em> models &mdash; and you have the whole of ViBe&rsquo;s dynamics.</p>
+
+    <p>The paper names three components explicitly: <em>&ldquo;(1) a memoryless update policy&hellip; (2) a random time subsampling&hellip; (3) a mechanism that propagates background pixel samples spatially&rdquo;</em>. All three live inside a strictly conservative scheme. Let&rsquo;s take them in that order.</p>
+
+    <h2 id="conservative">Conservative updating, and the deadlock it buys</h2>
+
+    <p>There are two schools. A <strong>blind</strong> update policy pushes every pixel&rsquo;s current value into its model regardless of how it was classified. A <strong>conservative</strong> policy only ever inserts values that were classified as <em>background</em>: as the paper puts it, <em>&ldquo;no foreground pixel value should ever be included in any background model.&rdquo;</em></p>
+
+    <p>Blind updating never gets stuck, but it dissolves what you&rsquo;re trying to detect: a slow-moving target continuously teaches the model its own appearance, and fades out from the middle. Conservative updating gives beautifully sharp, complete detections &mdash; <em>&ldquo;given that they do not share similar colors with the background&rdquo;</em>, a caveat we&rsquo;ll return to on the <a href="practice.html#failures">next page</a>. But it has a structural pathology the authors state plainly:</p>
+
+    <div class="callout warm">
+      <div class="label">The conservative-update deadlock</div>
+      <p><em>&ldquo;It also leads to deadlock situations and everlasting ghosts: a background sample incorrectly classified as foreground prevents its background pixel model from being updated. This can keep indefinitely the background pixel model from being updated and could cause a permanent misclassification.&rdquo;</em></p>
+      <p>The canonical example is a car that drives away from a parking spot. The asphalt it uncovers doesn&rsquo;t match any sample in that pixel&rsquo;s model &mdash; the model is full of car. So the asphalt is foreground. Because it&rsquo;s foreground, it may not update the model. Because the model never updates, the asphalt stays foreground. <strong>Forever.</strong> The region is now a self-sustaining false detection, and no amount of waiting fixes it.</p>
+    </div>
+
+    <p>Every conservative method needs an escape hatch. Earlier systems used counters &mdash; W<span class="top">4</span>&rsquo;s &ldquo;detection support map&rdquo; tallies how many consecutive frames a pixel has been foreground and force-feeds it into the background past a threshold. The ViBe authors reject this: such maps <em>&ldquo;only delay the inclusion of foreground pixels&rdquo;</em>, and because the decision is binary, recovering from a wrong forced inclusion is slow. Their alternative is to let information arrive from <em>somewhere else entirely</em> &mdash; from the pixel&rsquo;s neighbours. Hold that thought; it&rsquo;s <a href="#propagation">two sections down</a>.</p>
+
+    <h2 id="memoryless">Evict a random sample, not the oldest one</h2>
+
+    <p>Now the second question. The model is full; a new background value has arrived; something must go. The obvious answer &mdash; the one every ring buffer in the world implements &mdash; is <strong>evict the oldest</strong>. ViBe doesn&rsquo;t:</p>
+
+    <blockquote style="border-left: 3px solid var(--rule); margin: 20px 0; padding: 4px 0 4px 18px; color: var(--muted);">
+      <p style="margin:0;"><em>&ldquo;Instead of systematically removing the oldest sample from the pixel model, we choose the sample to be discarded randomly according to a uniform probability density function. This random strategy contradicts the idea that older values should be replaced first.&rdquo;</em></p>
+    </blockquote>
+
+    <p>Why would you do that? Because of what it does to the <em>ages</em> of the samples you&rsquo;re holding.</p>
+
+    <p>Under FIFO, twenty samples cover exactly the last twenty updates. The oldest thing your model knows is twenty updates old &mdash; a hard, brittle horizon. Under uniform random replacement, each of the <em>N</em> samples has probability 1/<em>N</em> of being the one overwritten, so any particular sample survives a given update with probability (<em>N</em>&minus;1)/<em>N</em>. Iterate that, and the probability a sample is still present after an elapsed time <em>dt</em> is</p>
+
+    <p class="eq">P(t, t + dt) = ( (N &minus; 1) / N )<span class="top">dt</span> = e<span class="top">&minus; ln( N / (N&minus;1) ) &middot; dt</span></p>
+
+    <p>A geometric decay, equivalently an exponential one. The sample set therefore contains a smooth spread of ages &mdash; mostly recent values, a few older ones, and a small but nonzero chance of a value from very long ago. There is no horizon at all: the time window is, in the paper&rsquo;s words, <em>&ldquo;theoretically infinite&rdquo;</em>, from twenty fixed bytes.</p>
+
+    <figure>
+      <svg viewBox="0 0 660 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two age-distribution plots: FIFO gives a flat block of ages ending in a hard cutoff at N updates; random replacement gives a smooth exponential decay with an unbounded tail">
+        <line x1="40" y1="180" x2="290" y2="180" stroke="#8a8580" stroke-width="1"/>
+        <line x1="40" y1="180" x2="40" y2="50" stroke="#8a8580" stroke-width="1"/>
+        <text x="165" y="205" text-anchor="middle" font-family="monospace" font-size="11" fill="#8a8580">sample age &rarr;</text>
+        <text x="165" y="224" text-anchor="middle" font-family="monospace" font-size="12" fill="#8a3f1e">FIFO: hard horizon at N</text>
+        <rect x="41" y="95" width="120" height="85" fill="#d97757" fill-opacity="0.35" stroke="#d97757" stroke-width="1.5"/>
+        <line x1="161" y1="60" x2="161" y2="188" stroke="#d97757" stroke-width="2" stroke-dasharray="4 3"/>
+        <text x="167" y="72" font-family="monospace" font-size="11" fill="#8a3f1e">nothing older</text>
+        <text x="161" y="196" text-anchor="middle" font-family="monospace" font-size="10" fill="#8a3f1e">N</text>
+
+        <line x1="370" y1="180" x2="640" y2="180" stroke="#8a8580" stroke-width="1"/>
+        <line x1="370" y1="180" x2="370" y2="50" stroke="#8a8580" stroke-width="1"/>
+        <text x="505" y="205" text-anchor="middle" font-family="monospace" font-size="11" fill="#8a8580">sample age &rarr;</text>
+        <text x="505" y="224" text-anchor="middle" font-family="monospace" font-size="12" fill="#3f5a40">random: exponential, no horizon</text>
+        <path d="M371,70 C 410,70 420,125 450,146 C 490,172 540,177 639,179 L639,180 L371,180 Z" fill="#6b8e6f" fill-opacity="0.30" stroke="#6b8e6f" stroke-width="1.5"/>
+        <text x="556" y="163" font-family="monospace" font-size="10" fill="#3f5a40">long tail</text>
+      </svg>
+      <figcaption>Replacing the oldest sample gives every model the same rigid memory span; replacing a random sample gives a spread of ages with an unbounded tail, so the same twenty bytes can hold both what the pixel looked like a second ago and what it looked like a minute ago.</figcaption>
+    </figure>
+
+    <div class="callout">
+      <div class="label">The key insight</div>
+      <p>Deterministic eviction couples <em>how much</em> you remember to <em>how far back</em> you remember. Random eviction decouples them. You choose <em>N</em> to control the model&rsquo;s <strong>resolution</strong> &mdash; how many distinct background modes it can hold &mdash; while the time span it covers stays open-ended. That is the entire reason ViBe gets away with twenty samples where a frame buffer would need thousands.</p>
+    </div>
+
+    <details>
+      <summary>The memoryless property &mdash; and a piece of loose wording in the paper</summary>
+      <p>Equation&nbsp;(5) as printed in the journal writes the exponent as (<em>t</em>+<em>dt</em>)&minus;<em>t</em> rather than <em>dt</em>; equation&nbsp;(6) is exactly <em>e</em><span class="top">&minus;ln(N/(N&minus;1))dt</span>. The substantive claim follows immediately after: <em>&ldquo;the probability of a sample being preserved for the interval (t, t + dt), assuming that it was included in the model prior to time t, is independent of t. In other words, the past has no effect on the future. This property, called the memoryless property, is known to be applicable to an exponential density.&rdquo;</em></p>
+      <p>That is correct, and it is the property that matters: a sample&rsquo;s chance of surviving the next second doesn&rsquo;t depend on whether it has already been in the model for one second or one hour. No sample is ever &ldquo;due&rdquo; to be evicted.</p>
+      <p>One sentence in the same paragraph is worth reading carefully, though: <em>&ldquo;the expected remaining lifespan of any sample value of the model decays exponentially.&rdquo;</em> Taken literally that contradicts memorylessness &mdash; under a genuinely exponential lifetime the <em>expected remaining lifespan is constant</em> (that is precisely what &ldquo;the past has no effect on the future&rdquo; means), and it is the <em>survival probability</em> that decays exponentially. It is loose phrasing rather than a broken result, but don&rsquo;t re-derive anything from that sentence; derive from equations&nbsp;(5) and&nbsp;(6).</p>
+    </details>
+
+    <p>A consequence worth stating out loud: <strong>ViBe is non-deterministic.</strong> Run it twice on the same video and you get slightly different masks &mdash; the paper says so explicitly. That is unusual for a low-level vision primitive and it makes debugging and benchmarking mildly annoying; seed your RNG if you need reproducibility.</p>
+
+    <h2 id="subsampling">Random time subsampling stretches the window further</h2>
+
+    <p>Random replacement makes the sample ages spread out. Updating <em>less often</em> stretches that spread further still, for free. So when a pixel is classified background, ViBe doesn&rsquo;t necessarily update &mdash; it flips a weighted coin and updates with probability 1/&phi;. The paper uses &phi;&nbsp;=&nbsp;16: <em>&ldquo;a background pixel value has 1 chance in 16 of being selected to update its pixel model.&rdquo;</em></p>
+
+    <p>Note that this is a <em>random</em> subsample, not every 16th frame, and the reason is specific: <em>&ldquo;in the presence of periodic or pseudo-periodic background motions, the use of fixed subsampling intervals might prevent the background model from properly adapting to these motions.&rdquo;</em> A deterministic decimation can beat against a periodic background &mdash; a fan, an escalator, a turnstile &mdash; and keep sampling the same phase forever. Randomizing breaks the resonance.</p>
+
+    <p>&phi; is the knob that sets ViBe&rsquo;s <em>timescale</em>, it is the one parameter the authors themselves later revisited, and it is the one with a concrete measured tradeoff &mdash; which shows up in the ghost discussion below.</p>
+
+    <h2 id="propagation">Samples leak into the neighbours</h2>
+
+    <p>Here is the piece with no counterpart in earlier sample-based methods, and the one that resolves the deadlock. When a pixel&rsquo;s value is used to update its own model, that same value is <em>also</em> written into the model of <strong>one randomly chosen spatial neighbour</strong>:</p>
+
+    <blockquote style="border-left: 3px solid var(--rule); margin: 20px 0; padding: 4px 0 4px 18px; color: var(--muted);">
+      <p style="margin:0;"><em>&ldquo;Let us consider the 4- or 8-connected spatial neighborhood of a pixel x, that is N<span class="small">G</span>(x), and assume that it has been decided to update the set of samples M(x) by inserting v(x). We then also use this value v(x) to update the set of samples M(y &isin; N<span class="small">G</span>(x)) from one of the pixels in the neighborhood, chosen at random according to a uniform law.&rdquo;</em></p>
+    </blockquote>
+
+    <p>The justification is exactly the deadlock: <em>&ldquo;Since we use a conservative update scheme, we have to provide a way of updating the background pixel models that are hidden by the foreground.&rdquo;</em> A pixel stuck under a false detection can never update itself &mdash; but its neighbours can update it. Background knowledge diffuses across the image from wherever the algorithm is still confident, seeping into regions that are frozen. The parking-spot deadlock breaks because the asphalt at the edge of the car-shaped ghost <em>is</em> being classified correctly, and it feeds asphalt samples inward.</p>
+
+    <figure>
+      <svg viewBox="0 0 680 290" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Flow diagram: a pixel classified as background triggers two independent one-in-phi coin flips, one replacing a random sample in its own model and one replacing a random sample in a random neighbour's model">
+        <defs>
+          <marker id="arr2" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0,0 L9,5 L0,10 z" fill="#1f5f7a"/>
+          </marker>
+        </defs>
+
+        <rect x="16" y="112" width="112" height="52" rx="6" fill="#eef4f6" stroke="#1f5f7a" stroke-width="1.5"/>
+        <text x="72" y="134" text-anchor="middle" font-family="monospace" font-size="12" fill="#1f5f7a">pixel x</text>
+        <text x="72" y="151" text-anchor="middle" font-family="monospace" font-size="11" fill="#3f5a40">= BACKGROUND</text>
+
+        <line x1="128" y1="138" x2="176" y2="92" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <line x1="128" y1="138" x2="176" y2="212" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr2)"/>
+
+        <rect x="182" y="58" width="118" height="46" rx="6" fill="#fbfaf8" stroke="#d9d4cc"/>
+        <text x="241" y="78" text-anchor="middle" font-family="monospace" font-size="11" fill="#6b6b6b">coin flip</text>
+        <text x="241" y="94" text-anchor="middle" font-family="monospace" font-size="11" fill="#d97757">p = 1/&#966;</text>
+        <line x1="300" y1="81" x2="352" y2="81" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="358" y="52" width="300" height="58" rx="6" fill="#eef4f6" stroke="#1f5f7a" stroke-width="1.5"/>
+        <text x="508" y="75" text-anchor="middle" font-family="monospace" font-size="11.5" fill="#1f5f7a">M(x)[ random j ] &larr; v(x)</text>
+        <text x="508" y="94" text-anchor="middle" font-family="monospace" font-size="10.5" fill="#6b6b6b">overwrite a uniformly random slot</text>
+
+        <rect x="182" y="188" width="118" height="46" rx="6" fill="#fbfaf8" stroke="#d9d4cc"/>
+        <text x="241" y="208" text-anchor="middle" font-family="monospace" font-size="11" fill="#6b6b6b">coin flip</text>
+        <text x="241" y="224" text-anchor="middle" font-family="monospace" font-size="11" fill="#d97757">p = 1/&#966;</text>
+        <line x1="300" y1="211" x2="352" y2="211" stroke="#1f5f7a" stroke-width="1.5" marker-end="url(#arr2)"/>
+        <rect x="358" y="182" width="300" height="58" rx="6" fill="#f3f6f1" stroke="#6b8e6f" stroke-width="1.5"/>
+        <text x="508" y="205" text-anchor="middle" font-family="monospace" font-size="11.5" fill="#3f5a40">M(y)[ random j ] &larr; v(x)</text>
+        <text x="508" y="224" text-anchor="middle" font-family="monospace" font-size="10.5" fill="#6b6b6b">y = random neighbour of x</text>
+
+        <text x="348" y="272" text-anchor="middle" font-family="monospace" font-size="11" fill="#8a3f1e">both branches write v(x) &mdash; the current pixel value at x</text>
+      </svg>
+      <figcaption>The complete update, as the paper&rsquo;s Appendix&nbsp;A pseudo-code implements it. Nothing happens at all unless the pixel was classified background; then two independent coin flips decide whether it refreshes its own model and whether it seeds a neighbour&rsquo;s.</figcaption>
+    </figure>
+
+    <div class="callout warm">
+      <div class="label">Gotcha: what actually gets written</div>
+      <p>The value inserted into the <em>neighbour&rsquo;s</em> model is <strong>v(x), the current pixel value at x</strong> &mdash; not a sample drawn from x&rsquo;s model. The pseudo-code line is literally <code>samples[xNG][yNG][rand] = image[x][y]</code>. It&rsquo;s a common misreading, and it matters: propagation injects a <em>fresh observation from a neighbouring location</em>, which is what makes the &ldquo;neighbouring pixels share a similar temporal distribution&rdquo; assumption load-bearing.</p>
+    </div>
+
+    <p>The obvious worry is that this smears the model &mdash; that one wrong value diffusing outward corrupts the whole image. Two things stop it. First, models hold many samples, so <em>&ldquo;irrelevant information that could accidentally be inserted into the neighborhood model does not affect the accuracy of the detection.&rdquo;</em> Second, and more elegantly, propagation is <strong>gated by matching</strong>: a planted sample only helps a pixel become background if the value <em>actually observed</em> there is close to it, and only a pixel classified background propagates anything further. In the paper&rsquo;s words, <em>&ldquo;the erroneous diffusion of irrelevant information is blocked by the need to match an observed value before it can propagate further. This natural limitation inhibits the diffusion of error.&rdquo;</em></p>
+
+    <p>That gate is not just a safety property. It is the mechanism behind ViBe&rsquo;s most-cited behaviour.</p>
+
+    <h2 id="ghosts">Ghosts dissolve; stopped objects don&rsquo;t</h2>
+
+    <p>A <strong>ghost</strong> is, quoting the definition the paper borrows, <em>&ldquo;a set of connected points, detected as in motion but not corresponding to any real moving object&rdquo;</em>. You get one whenever the model contains something that isn&rsquo;t there any more: an object present during <a href="index.html">frame-0 initialization</a> that then walks away, or the parking spot the car vacated.</p>
+
+    <p>The complementary problem is a real object that <em>stops</em> &mdash; a car that parks. Ideally you want the ghost absorbed into the background fast and the parked car kept in the foreground as long as possible. But from the model&rsquo;s point of view these are the same situation: an unchanging region that doesn&rsquo;t match its samples. Any timer-based rule treats them identically. ViBe gets them right in <em>opposite directions</em>, and claims that asymmetry as a headline contribution: <em>&ldquo;a ghost&hellip; is added to the background model more quickly than an object that stops moving.&rdquo;</em></p>
+
+    <p>The reason is the color-match gate, and it is genuinely clever:</p>
+
+    <div class="two-col">
+      <div>
+        <h3>Ghost &rarr; erodes quickly</h3>
+        <p>A ghost region is showing the <em>real background</em>. Neighbouring background pixels diffuse their samples inward, and those samples <strong>match what the camera is actually seeing</strong> there &mdash; asphalt seeds land on asphalt. Border pixels flip to background, which lets them propagate further inward next frame. The ghost erodes from its edges until it&rsquo;s gone.</p>
+      </div>
+      <div>
+        <h3>Stopped object &rarr; persists</h3>
+        <p>A real object has borders whose colors <em>&ldquo;differ noticeably from those of the samples stored in the surrounding background pixel models&rdquo;</em>. Background samples diffuse into the object&rsquo;s edge pixels too &mdash; but they don&rsquo;t match the car sitting there, so those pixels stay foreground and the diffusion front <strong>stalls at the boundary</strong>. Nothing gets inside.</p>
+      </div>
+    </div>
+
+    <p>So how does a parked car <em>ever</em> become background? The paper&rsquo;s answer is unexpectedly candid, and worth knowing because it explains a lot of ViBe&rsquo;s real-world behaviour:</p>
+
+    <blockquote style="border-left: 3px solid var(--rule); margin: 20px 0; padding: 4px 0 4px 18px; color: var(--muted);">
+      <p style="margin:0;"><em>&ldquo;The responsibility for the absorption of foreground pixels into the background lies with the noise inevitably present in the video sequence. Due to the noise, some pixels of the foreground object end up in the background, and then serve as background seeds. Consequently, their models are corrupted with foreground samples. These samples later diffuse into their neighboring models&hellip; and allow a slow inclusion of foreground objects in the background.&rdquo;</em></p>
+    </blockquote>
+
+    <p>In other words: absorption of static objects is <strong>driven by sensor noise</strong>, not by any designed mechanism. There is no timer, no counter, no control over it &mdash; it happens at whatever rate your camera&rsquo;s noise floor and the scene&rsquo;s contrast dictate. If your application needs &ldquo;object stationary for 30&nbsp;s &rarr; absorb it&rdquo;, ViBe has no way to express that; you are building it on top.</p>
+
+    <div class="callout sage">
+      <div class="label">How fast, concretely</div>
+      <p>The paper measures ghost suppression on one sequence (a carpet moved on a floor) at an assumed 30&nbsp;fps: with &phi;&nbsp;=&nbsp;1 the ghost fades in about <strong>2 seconds</strong>; with &phi;&nbsp;=&nbsp;64 it takes about <strong>2 minutes</strong>. Two caveats. These are numbers from a single sequence, not a guarantee &mdash; the paper notes suppression is faster on untextured backgrounds and when the uncovered background resembles the removed object. And &phi; cuts both ways: turning it down to kill ghosts quickly also absorbs stopped objects quickly.</p>
+    </div>
+
+    <details>
+      <summary>The reference pseudo-code, and one real inconsistency in the literature</summary>
+      <p>Appendix&nbsp;A of the 2011 paper, condensed (greyscale version):</p>
+<pre><code>int N = 20; int R = 20; int min = 2; int phi = 16;
+byte samples[width][height][N];
+
+// --- 1. compare pixel to background model ---
+int count = 0, index = 0, dist = 0;
+while ((count &lt; min) &amp;&amp; (index &lt; N)) {
+    dist = EuclidDist(image[x][y], samples[x][y][index]);
+    if (dist &lt; R) count++;
+    index++;
+}
+
+// --- 2. classify, then 3./4. update ---
+if (count &gt;= min) {
+    segMap[x][y] = BACKGROUND;
+
+    // 3. update current pixel model
+    int rand = getRandomNumber(0, phi - 1);
+    if (rand == 0) {
+        rand = getRandomNumber(0, N - 1);
+        samples[x][y][rand] = image[x][y];
+    }
+    // 4. update neighbouring pixel model
+    rand = getRandomNumber(0, phi - 1);
+    if (rand == 0) {
+        int xNG = getRandomNeighbrXCoordinate(x);
+        int yNG = getRandomNeighbrYCoordinate(y);
+        rand = getRandomNumber(0, N - 1);
+        samples[xNG][yNG][rand] = image[x][y];
+    }
+} else {
+    segMap[x][y] = FOREGROUND;
+}</code></pre>
+      <p>Note the <code>while</code> loop&rsquo;s early exit on <code>count &lt; min</code> &mdash; a background pixel usually costs two comparisons, not twenty.</p>
+      <p><strong>The inconsistency:</strong> this pseudo-code draws <em>two independent</em> <code>getRandomNumber(0, phi-1)</code> values, so a neighbour can be seeded on a frame where the pixel&rsquo;s own model was <em>not</em> updated. But the 2012 follow-up describes the two as coupled &mdash; <em>&ldquo;once the random policy decides to substitute a value of the model, it also inserts that value in the model of one of the neighboring pixels&rdquo;</em> &mdash; and the authors&rsquo; released C code implements the coupled version, a single background branch writing to both the pixel&rsquo;s own slot and the neighbour&rsquo;s. The practical difference is small (the neighbour is seeded at rate 1/&phi; either way), but if you are reimplementing from the paper and comparing against the reference code, this is a real source of divergence. State it as: <em>the pseudo-code decouples the two draws; the shipped implementation couples them.</em></p>
+    </details>
+
+    <details>
+      <summary>Two more places the published algorithm and the shipped code differ</summary>
+      <p><strong>Initialization.</strong> The paper fills M<span class="top">0</span>(x) with values drawn from the 8-connected neighbourhood in frame 0. The reference C implementation instead fills it with the pixel&rsquo;s own value plus uniform noise (<code>value + rand() % 20 - 10</code>). That is a different assumption entirely &mdash; spatial borrowing versus synthetic jitter &mdash; and it changes early-frame behaviour on textured scenes.</p>
+      <p><strong>Neighbourhood size.</strong> Section III-C-4 says <em>&ldquo;4- or 8-connected&rdquo;</em> for propagation, leaving it open; the unambiguous &ldquo;8-connected&rdquo; statement in the paper belongs to <em>initialization</em>, where it is reported as tested at 640&times;480. In practice, implementations use 8.</p>
+    </details>
+
+    <p>Put the three components together and the character of the algorithm is clear. Classification is a memoryless snapshot of what this pixel has recently &mdash; and not-so-recently &mdash; been. Updating is a slow randomized trickle that never commits to a timescale. And confidence spreads sideways through the image, gated by agreement with what the camera actually sees. <a href="practice.html">Next: which knobs matter, where this breaks, and what came after.</a></p>
+
+    <footer class="page-foot">
+      <span>ViBe: Background as a Bag of Samples</span>
+      <span><a href="practice.html">Next: In practice &rarr;</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>

@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The background is a bag of pixels you&rsquo;ve already seen — ViBe: Background as a Bag of Samples</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<nav class="topnav">
+  <div class="inner">
+    <a href="index.html" class="brand"><span class="dot"></span>ViBe: Background as a Bag of Samples</a>
+    <div class="links">
+      <a href="index.html" class="active">The idea</a>
+      <a href="update.html">The update policy</a>
+      <a href="practice.html">In practice</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wide">
+  <article>
+    <header class="page-head">
+      <div class="eyebrow">A short interactive field guide</div>
+      <h1>The background is a bag of pixels you&rsquo;ve already seen</h1>
+      <p class="lead">ViBe throws away the statistics. Each pixel remembers twenty raw values it has been in the past, and a new value is background if it lands close to a couple of them. No Gaussians, no histograms, no learning rate &mdash; and it runs faster than everything it replaced.</p>
+    </header>
+
+    <h2>The question is &ldquo;which pixels are new?&rdquo;</h2>
+
+    <p>Point a camera at a parking lot and leave it there. Almost every pixel is boring: the same asphalt, the same wall, the same patch of sky, frame after frame. What you care about is the small fraction that <em>isn&rsquo;t</em> boring &mdash; the car pulling in, the person walking past. <strong>Background subtraction</strong> is the operation that separates the two: in, a video from a fixed camera; out, a binary mask marking every pixel that doesn&rsquo;t belong to the scene&rsquo;s idea of &ldquo;normal&rdquo;.</p>
+
+    <p>It is the cheapest useful primitive in video analysis. It runs before the expensive things &mdash; you segment first, then only run a classifier on the blobs, or feed the blobs straight into a <a href="../bytetrack-guide/index.html">multi-object tracker</a>. On a fixed camera it costs a few operations per pixel and gives you most of what a detector would, without a detector.</p>
+
+    <p>The naive attempts fail in instructive ways, and the failures are what ViBe is designed around.</p>
+
+    <div class="two-col">
+      <div>
+        <h3>Difference consecutive frames</h3>
+        <p>Threshold |<em>I</em><span class="small">t</span> &minus; <em>I</em><span class="small">t&minus;1</span>|. Dead simple, and almost useless: a uniformly-colored car produces a detection only at its <em>leading and trailing edges</em>, because its middle looks the same as its middle did last frame. Stop the car and it vanishes entirely.</p>
+      </div>
+      <div>
+        <h3>Keep a running average</h3>
+        <p>Maintain one background value per pixel, <em>B</em> &larr; (1&minus;&alpha;)<em>B</em> + &alpha;<em>I</em>, and threshold the residual. Now stationary objects survive. But a single average per pixel assumes the background is <em>unimodal</em>, and plenty of backgrounds aren&rsquo;t.</p>
+      </div>
+    </div>
+
+    <p>That last failure is the important one. Consider a pixel that sits on the edge of a leaf swaying in the wind. Half the time it&rsquo;s dark green leaf; half the time it&rsquo;s bright sky. Its <em>average</em> is a murky teal &mdash; a color that pixel is <strong>never actually observed to be</strong>. A model built on that average flags the pixel as foreground essentially always. The same goes for rippling water, a flickering monitor, a flag, an escalator.</p>
+
+    <p>The canonical fix, and the field&rsquo;s workhorse for a decade, was to make the per-pixel model <em>multimodal</em>: model each pixel as a <strong>mixture of K Gaussians</strong> (Stauffer &amp; Grimson, CVPR 1999), later with <em>K</em> chosen adaptively per pixel (Zivkovic, ICPR 2004 &mdash; this is OpenCV&rsquo;s <code>MOG2</code>). Now the leaf pixel gets a green component and a sky component and both count as background. It works. But look at what you&rsquo;re doing: you are fitting a parametric probability density, online, per pixel, from a handful of effective observations, with a learning rate you have to tune, and you need a training period before the fit means anything.</p>
+
+    <div class="callout">
+      <div class="label">The key insight</div>
+      <p>ViBe&rsquo;s answer is to <strong>not estimate a density at all</strong>. If what you want to know is &ldquo;have I seen this value here before?&rdquo;, then don&rsquo;t fit a distribution and evaluate it &mdash; just <em>keep some of the values</em> and look. The paper is blunt about it: <em>&ldquo;no estimation of the pdf of the background pixel is performed&rdquo;</em>; instead we <em>&ldquo;build a model with real observed pixel values.&rdquo;</em></p>
+    </div>
+
+    <h2>The model is twenty numbers per pixel</h2>
+
+    <p>Every pixel location <em>x</em> owns a set of <em>N</em> samples, each one an actual value that pixel took in some previous frame:</p>
+
+    <p class="eq">M(x) = { v<span class="small">1</span>, v<span class="small">2</span>, &hellip;, v<span class="small">N</span> }</p>
+
+    <p>That&rsquo;s the whole model. No means, no variances, no weights, no component count, no timestamps. For a 640&times;480 greyscale video with <em>N</em>&nbsp;=&nbsp;20 it is a <code>byte[480][640][20]</code> &mdash; twenty bytes per pixel, and the paper&rsquo;s pseudo-code declares exactly that.</p>
+
+    <h2>Classification is counting, not fitting</h2>
+
+    <p>Now a new frame arrives and the pixel has value <em>v</em>(<em>x</em>). Draw a sphere of radius <em>R</em> around it in color space, <em>S<span class="small">R</span></em>(<em>v</em>(<em>x</em>)), and count how many of the <em>N</em> stored samples fall inside. If at least <strong>#min</strong> of them do, the pixel is background:</p>
+
+    <p class="eq">#{ S<span class="small">R</span>(v(x)) &cap; { v<span class="small">1</span>, v<span class="small">2</span>, &hellip;, v<span class="small">N</span> } } &ge; #min</p>
+
+    <p>With the paper&rsquo;s defaults &mdash; <em>N</em>&nbsp;=&nbsp;20, <em>R</em>&nbsp;=&nbsp;20, <strong>#min</strong>&nbsp;=&nbsp;2 &mdash; the entire decision procedure reads: <em>&ldquo;of the twenty values I remember being, are at least two of them within 20 grey levels of what I see right now?&rdquo;</em> If yes, background. If no, foreground. That is the complete classifier.</p>
+
+    <figure>
+      <svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two color-space plots: on the left a new pixel value whose radius-R sphere contains four stored samples, classified background; on the right a new value whose sphere contains none, classified foreground">
+        <defs>
+          <marker id="ar" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto">
+            <path d="M0,0 L9,5 L0,10 z" fill="#1f5f7a"/>
+          </marker>
+        </defs>
+
+        <!-- LEFT PANEL -->
+        <rect x="20" y="40" width="290" height="220" rx="6" fill="#fbfaf8" stroke="#d9d4cc"/>
+        <text x="30" y="60" font-family="monospace" font-size="11" fill="#8a8580">C2</text>
+        <text x="285" y="252" font-family="monospace" font-size="11" fill="#8a8580">C1</text>
+
+        <!-- stored samples left -->
+        <circle cx="120" cy="150" r="4" fill="#6b8e6f"/>
+        <circle cx="145" cy="128" r="4" fill="#6b8e6f"/>
+        <circle cx="103" cy="171" r="4" fill="#6b8e6f"/>
+        <circle cx="160" cy="165" r="4" fill="#6b8e6f"/>
+        <circle cx="205" cy="95" r="4" fill="#6b8e6f"/>
+        <circle cx="222" cy="118" r="4" fill="#6b8e6f"/>
+        <circle cx="238" cy="88" r="4" fill="#6b8e6f"/>
+        <circle cx="215" cy="215" r="4" fill="#6b8e6f"/>
+        <circle cx="248" cy="196" r="4" fill="#6b8e6f"/>
+        <circle cx="75" cy="105" r="4" fill="#6b8e6f"/>
+
+        <!-- sphere left -->
+        <circle cx="132" cy="152" r="42" fill="#1f5f7a" fill-opacity="0.10" stroke="#1f5f7a" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <circle cx="132" cy="152" r="5.5" fill="#1f5f7a"/>
+        <line x1="132" y1="152" x2="174" y2="152" stroke="#1f5f7a" stroke-width="1"/>
+        <text x="146" y="146" font-family="monospace" font-size="11" fill="#1f5f7a">R</text>
+        <text x="132" y="182" text-anchor="middle" font-family="monospace" font-size="11" fill="#1f5f7a">v(x)</text>
+
+        <text x="165" y="28" text-anchor="middle" font-family="monospace" font-size="12" fill="#3f5a40">4 samples inside &ge; #min</text>
+        <text x="165" y="282" text-anchor="middle" font-family="monospace" font-size="13" fill="#3f5a40">&rarr; BACKGROUND</text>
+
+        <!-- RIGHT PANEL -->
+        <rect x="410" y="40" width="290" height="220" rx="6" fill="#fbfaf8" stroke="#d9d4cc"/>
+        <text x="420" y="60" font-family="monospace" font-size="11" fill="#8a8580">C2</text>
+        <text x="675" y="252" font-family="monospace" font-size="11" fill="#8a8580">C1</text>
+
+        <!-- stored samples right (same cloud) -->
+        <circle cx="510" cy="150" r="4" fill="#6b8e6f"/>
+        <circle cx="535" cy="128" r="4" fill="#6b8e6f"/>
+        <circle cx="493" cy="171" r="4" fill="#6b8e6f"/>
+        <circle cx="550" cy="165" r="4" fill="#6b8e6f"/>
+        <circle cx="595" cy="95" r="4" fill="#6b8e6f"/>
+        <circle cx="612" cy="118" r="4" fill="#6b8e6f"/>
+        <circle cx="628" cy="88" r="4" fill="#6b8e6f"/>
+        <circle cx="605" cy="215" r="4" fill="#6b8e6f"/>
+        <circle cx="638" cy="196" r="4" fill="#6b8e6f"/>
+        <circle cx="465" cy="105" r="4" fill="#6b8e6f"/>
+
+        <!-- sphere right, empty region -->
+        <circle cx="470" cy="228" r="42" fill="#d97757" fill-opacity="0.10" stroke="#d97757" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <circle cx="470" cy="228" r="5.5" fill="#d97757"/>
+        <text x="470" y="200" text-anchor="middle" font-family="monospace" font-size="11" fill="#d97757">v(x)</text>
+
+        <text x="555" y="28" text-anchor="middle" font-family="monospace" font-size="12" fill="#8a3f1e">0 samples inside &lt; #min</text>
+        <text x="555" y="282" text-anchor="middle" font-family="monospace" font-size="13" fill="#8a3f1e">&rarr; FOREGROUND</text>
+      </svg>
+      <figcaption>The whole classifier, drawn in a 2-D slice of color space: green dots are the twenty values this pixel has been, and the dashed circle is the radius-<em>R</em> sphere around what it is right now. Note that the sample cloud on the left has two clearly separate clumps &mdash; a bimodal background pixel is represented for free, with no mixture model and no component count.</figcaption>
+    </figure>
+
+    <p>Two properties of this rule are worth dwelling on, because they are where the method gets its robustness.</p>
+
+    <p><strong>The model is multimodal by construction.</strong> Look again at the figure: the leaf-and-sky pixel simply stores some green samples and some blue ones, roughly in proportion to how often it is each. Nothing had to decide that this pixel needs two components while its neighbor needs one. There is no <em>K</em>. The multimodality that MOG2 achieves by fitting and pruning Gaussians, ViBe gets by the trivial expedient of remembering.</p>
+
+    <p><strong>#min = 2 is a deliberately tiny threshold, and it is doing real work.</strong> Requiring two matches rather than one says &ldquo;I&rsquo;ve seen a value like this here before, and not just once, by accident&rdquo; &mdash; it filters out a single stale or noisy sample that happens to sit near the current value. Requiring only two rather than ten means a background mode needs to occupy just 10% of the sample set to be recognized, so rare-but-real background states (the leaf position that only occurs in a gust) still get respected. The paper notes that sensitivity is really governed by the <em>ratio</em> <strong>#min</strong>/<em>N</em>, and that with a stable background you can even drop to <strong>#min</strong>&nbsp;=&nbsp;1.</p>
+
+    <div class="callout warm">
+      <div class="label">Gotcha: the defaults you read are not the defaults you get</div>
+      <p>The 2011 paper specifies a <em>Euclidean</em> sphere with <em>N</em>&nbsp;=&nbsp;20, <em>R</em>&nbsp;=&nbsp;20, &phi;&nbsp;=&nbsp;16. The authors&rsquo; own released C code ships <strong><em>N</em>&nbsp;=&nbsp;30, <em>R</em>&nbsp;=&nbsp;10, &phi;&nbsp;=&nbsp;8</strong> and computes an <strong>L1</strong> distance for color (|&Delta;r|&nbsp;+&nbsp;|&Delta;g|&nbsp;+&nbsp;|&Delta;b|&nbsp;&le;&nbsp;4.5<em>R</em>), not a Euclidean one &mdash; the README says outright that &ldquo;parameters used in the implementations have changed&rdquo;. And the 2009 ICASSP version used <em>R</em>&nbsp;=&nbsp;30 with no &phi; at all. Quote 20/20/2/16 as <em>the paper&rsquo;s</em> values, not as canon.</p>
+    </div>
+
+    <details>
+      <summary>Why not just keep a buffer of the last <em>N</em> frames?</summary>
+      <p>This is the obvious version of the same idea &mdash; a ring buffer of the last twenty observed values &mdash; and it is roughly what earlier sample-based work did. It has one crippling property: <strong>twenty samples buy you exactly twenty frames of memory</strong>, less than a second of video. A background that changes on the scale of minutes (sun moving behind a cloud, a car parked and left) is invisible to it, and the only fix is more memory, linearly.</p>
+      <p>What you actually want is a set of samples whose <em>ages</em> span a long window &mdash; a few recent, a few from a minute ago, maybe one from five minutes ago. Committing to fixed ages is bad too, because you&rsquo;ve then hard-coded a timescale. ViBe&rsquo;s resolution is to make the age distribution fall out of a random replacement rule, which buys a <em>theoretically infinite</em> time window from a fixed twenty bytes. That argument is the subject of <a href="update.html#memoryless">the next page</a>, and it&rsquo;s the reason ViBe is not just &ldquo;SACON with better marketing&rdquo;.</p>
+    </details>
+
+    <h2>What it costs</h2>
+
+    <p>Almost nothing, and for a subtle reason. The comparison loop <strong>exits as soon as #min matches are found</strong>, so a typical background pixel &mdash; the overwhelming majority of the frame &mdash; is settled after about two comparisons, not twenty. (The released implementation sharpens this further with a trick the paper never mentions: it <em>swaps matching samples to the front of the buffer</em>, so the next frame usually matches on the first two probes.) Appendix B of the paper works it out at roughly 2.5 byte-comparisons plus 1.5 counter comparisons per pixel &mdash; comparable to a first-order recursive filter.</p>
+
+    <p>The headline number: <strong>200 frames per second on 640&times;480 video</strong>, on a 2.67&nbsp;GHz Core i7 in C, about five times faster than the Intel-optimized GMM implementations it was compared against. A downscaled variant exceeds 350 fps.</p>
+
+    <div class="callout sage">
+      <div class="label">A number that gets misquoted</div>
+      <p>You will see &ldquo;ViBe needs one byte and one comparison per pixel&rdquo;. That figure belongs to the deliberately <em>downscaled</em> variant described in the same paper, not to ViBe proper. Full ViBe costs <em>N</em> bytes per pixel per channel &mdash; 20&nbsp;B/px greyscale at the paper&rsquo;s defaults, 60&nbsp;B/px for RGB, and 90&nbsp;B/px at the code&rsquo;s <em>N</em>&nbsp;=&nbsp;30. That is genuinely more memory than MOG2 uses; ViBe trades memory for arithmetic, which is the right trade on modern hardware but is a trade.</p>
+    </div>
+
+    <h2>It starts working on frame two</h2>
+
+    <p>Most background models need a training sequence &mdash; tens or hundreds of frames of empty scene &mdash; before their statistics mean anything. ViBe fills its model from a <strong>single frame</strong>. The trick is to borrow across space instead of time: assume neighboring pixels share a similar temporal distribution, and populate each pixel&rsquo;s model with values drawn at random from its 8-connected neighborhood in frame 0.</p>
+
+    <p class="eq">M<span class="top">0</span>(x) = { v<span class="top">0</span>(y | y &isin; N<span class="small">G</span>(x)) }</p>
+
+    <p>Locations <em>y</em> are drawn uniformly and with replacement, so a given neighbor may be picked several times or not at all &mdash; duplicates in the model are expected, not a bug. From frame 2 onward you have a usable segmentation. This also means the recovery procedure for a catastrophic scene change (someone flips the lights on) is simply to <em>throw the model away and re-initialize from the current frame</em> &mdash; a one-frame operation.</p>
+
+    <p>The cost of this shortcut is that anything moving through frame 0 gets baked into the model as if it were scenery, and leaves behind a <a href="update.html#ghosts">ghost</a> when it moves on. Handling that gracefully is one of the things the update policy is built to do.</p>
+
+    <div class="cards">
+      <a class="card" href="update.html">
+        <div class="num">02 &middot; the actual invention</div>
+        <h3>The update policy</h3>
+        <p>Conservative, memoryless, randomly sub-sampled in time, and diffusing sideways into the neighbors. Why forgetting at random beats forgetting the oldest, and how ghosts dissolve while stopped objects don&rsquo;t.</p>
+      </a>
+      <a class="card" href="practice.html">
+        <div class="num">03 &middot; using it for real</div>
+        <h3>In practice</h3>
+        <p>Which of the four knobs actually matter, the six ways ViBe fails on real footage, what ViBe+ / PBAS / SuBSENSE fixed, and the patent situation &mdash; which changed in January 2026.</p>
+      </a>
+    </div>
+
+    <h2 id="references">References</h2>
+
+    <ul>
+      <li>O. Barnich and M. Van Droogenbroeck, <strong>&ldquo;ViBe: A universal background subtraction algorithm for video sequences&rdquo;</strong>, <em>IEEE Transactions on Image Processing</em>, 20(6):1709&ndash;1724, June 2011. <a href="https://orbi.uliege.be/handle/2268/145853">ORBi&nbsp;2268/145853</a> &mdash; the canonical reference; everything on these pages traces back to it.</li>
+      <li>O. Barnich and M. Van Droogenbroeck, &ldquo;ViBe: A powerful random technique to estimate the background in video sequences&rdquo;, <em>IEEE ICASSP</em>, Taipei, pp. 945&ndash;948, April 2009. The earlier, shorter version &mdash; no time subsampling, <em>R</em>&nbsp;=&nbsp;30.</li>
+      <li>M. Van Droogenbroeck and O. Paquot, &ldquo;Background subtraction: Experiments and improvements for ViBe&rdquo;, <em>IEEE CVPR Workshops (Change Detection Workshop)</em>, Providence RI, pp. 32&ndash;37, June 2012. <a href="https://orbi.uliege.be/handle/2268/117561">ORBi&nbsp;2268/117561</a> &mdash; ViBe+.</li>
+      <li>M. Bou, T. Ehret, G. Facciolo, J.-M. Morel and R. Grompone von Gioi, &ldquo;Reviewing ViBe, a popular background subtraction algorithm for real-time applications&rdquo;, <em>Image Processing On Line</em>, 12:526&ndash;548, 2022. An independent, peer-reviewed reproduction with runnable code &mdash; the best place to see where the paper and the implementations diverge.</li>
+      <li>C. Stauffer and W. E. L. Grimson, &ldquo;Adaptive background mixture models for real-time tracking&rdquo;, <em>CVPR</em>, pp. 246&ndash;252, 1999. Z. Zivkovic, &ldquo;Improved adaptive Gaussian mixture model for background subtraction&rdquo;, <em>ICPR</em>, pp. 28&ndash;31, 2004 &mdash; the MOG/MOG2 lineage ViBe was measured against.</li>
+      <li><a href="https://github.com/vandroogenbroeckmarc/vibe">github.com/vandroogenbroeckmarc/vibe</a> &mdash; the authors&rsquo; reference implementation, Apache-2.0 since January 2026.</li>
+    </ul>
+
+    <footer class="page-foot">
+      <span>ViBe: Background as a Bag of Samples</span>
+      <span><a href="update.html">Next: The update policy &rarr;</a></span>
+    </footer>
+  </article>
+</main>
+
+</body>
+</html>

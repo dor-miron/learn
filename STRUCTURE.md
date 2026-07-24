@@ -8,6 +8,7 @@
 - `camera-intrinsics-guide/` — Interactive HTML study guide on the camera intrinsic matrix K ("Camera Intrinsics, the Linear Model").
 - `dcf-tracking-guide/` — Interactive HTML study guide on discriminative correlation-filter tracking ("Click-to-Track: Correlation Filters").
 - `transformers-guide/` — Interactive HTML study guide ("A Visual Guide to Transformers").
+- `vibe-guide/` — Interactive HTML study guide on the ViBe background-subtraction algorithm ("ViBe: Background as a Bag of Samples").
 - `otd-verified.jpeg` — loose top-level JPEG (857×806); not referenced by any guide page.
 
 ## `bytetrack-guide/`
@@ -52,3 +53,14 @@ ByteTrack study guide — motivation + algorithm on the mainline page, surroundi
 - `transformers-guide/dino.html` — ViT & DINO: vision transformers and self-supervised features.
 - `transformers-guide/llms.html` — LLMs & decoders: decoder-only transformer language models.
 - `transformers-guide/styles.css` — shared stylesheet for the guide's pages.
+
+## `vibe-guide/`
+
+"ViBe: Background as a Bag of Samples" — three-page interactive textbook on the ViBe background-subtraction algorithm (Barnich & Van Droogenbroeck): the per-pixel sample model, the random/conservative/spatial update policy, and where it breaks. Produced via the `learn-html` skill.
+
+- `vibe-guide/index.html` — the idea: why per-pixel densities fail, and how twenty raw samples plus a "count matches within radius R" test replace them.
+- `vibe-guide/update.html` — the update policy: conservative updating and its deadlock, memoryless random replacement, time subsampling φ, spatial propagation, and the ghost vs. stopped-object asymmetry.
+- `vibe-guide/practice.html` — in practice: the four parameters, six failure modes, ViBe+/PBAS/SuBSENSE, CDnet numbers, a runnable NumPy implementation, and the Apache-2.0 relicensing (Jan 2026).
+- `vibe-guide/styles.css` — shared stylesheet for the guide's pages.
+- `vibe-guide/_manifest.json` — page manifest (title + per-page slug, nav label, eyebrow, h1, lead) driving the guide's navigation.
+- `vibe-guide/_plan.md` — authoring plan: subject, audience, page arc, and design choices for the guide.

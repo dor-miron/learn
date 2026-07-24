@@ -1,0 +1,26 @@
+{
+  "title": "ViBe: Background as a Bag of Samples",
+  "pages": [
+    {
+      "slug": "index",
+      "nav_label": "The idea",
+      "eyebrow": "A short interactive field guide",
+      "h1": "The background is a bag of pixels you&rsquo;ve already seen",
+      "lead": "ViBe throws away the statistics. Each pixel remembers twenty raw values it has been in the past, and a new value is background if it lands close to a couple of them. No Gaussians, no histograms, no learning rate &mdash; and it runs faster than everything it replaced."
+    },
+    {
+      "slug": "update",
+      "nav_label": "The update policy",
+      "eyebrow": "02 &middot; the actual invention",
+      "h1": "Forgetting at random is the whole trick",
+      "lead": "The sample model is simple enough to fit on a napkin. What makes ViBe work is how the samples get replaced: conservatively, randomly, sub-sampled in time, and &mdash; the strange one &mdash; leaking sideways into the neighbours."
+    },
+    {
+      "slug": "practice",
+      "nav_label": "In practice",
+      "eyebrow": "03 &middot; using it for real",
+      "h1": "Parameters, failure modes, and what came after",
+      "lead": "Where the four knobs actually matter, the six ways ViBe fails on real footage, how ViBe+ and PBAS patched it, and the patent you should know about before shipping."
+    }
+  ]
+}
